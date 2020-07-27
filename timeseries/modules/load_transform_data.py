@@ -56,7 +56,8 @@ def create_overall_sum_df(given_data):
             
         result['Gesamt Menge in ST'] = result['Gesamt Menge in ST'].add(dat['Gesamt Menge in ST'], fill_value = 0)  
         result['Gesamt Wert in EUR'] = result['Gesamt Wert in EUR'].add(dat['Gesamt Wert in EUR'], fill_value = 0)  
-    
+   
+    result.reset_index(level=0, inplace=True)
     return result
 
 def heatmap(data, row_labels, col_labels, ax=None,
@@ -136,7 +137,29 @@ def plot_hist(data_farem, string_name):
     plt.title('Histogram of ' + string_name)
     plt.show()
     
+def create_description(data_frame_dict):
+    result = {}
+    for data_key ,data_frame in data_frame_dict.items():
+        temp_df_main = data_frame.describe().iloc[[0,1,2,3,7],]
+        temp_df_date = data_frame['Verkaufsdatum'].describe().iloc[[0,4,5],]
+        temp_df_date.index = ['count', 'min', 'max']
+        result.update({data_key: pd.concat([temp_df_main,temp_df_date], axis = 1)})    
+    return result 
 
+def create_tex_tables(dictionary, save_path, combined = False):    
+    if combined:
+        temp_dict = pd.DataFrame()
+        for key, value in dictionary.items():
+            temp_df = value.T
+            temp_df.set_index([np.repeat(key,len(temp_df.index)), temp_df.index], inplace = True) 
+            temp_dict = temp_dict.append(temp_df)
+        temp_dict.to_latex(save_path + 'combined.tex')
+    else:    
+        for key, value in dictionary.items():
+            value.to_latex(save_path + key + '.tex')
+    
+        
+#%%
 def main():
     
     bvg_orig_list = load_data(ORIG_DATA_PATH)
@@ -150,15 +173,17 @@ def main():
     bvg_orig_dict = {names[i]: bvg_orig_list[i] for i in range(len(names))} 
     bvg_orig_dict.update({'overall_data': overall_data})
 
-    for dic_key, dic_entry in bvg_orig_dict.items():
-        profile = ProfileReport(dic_entry, title="Pandas Profiling Report")
-        profile.to_file('./timeseries/plots/pandas_profiler' + dic_key + '.html')
+    # for dic_key, dic_entry in bvg_orig_dict.items():
+    #     profile = ProfileReport(dic_entry, title="Pandas Profiling Report")
+    #     profile.to_file('./timeseries/plots/pandas_profiler' + dic_key + '.html')
     
     plot_corr(overall_data)
     
     plot_hist(overall_data, 'Gesamt Menge in ST')
     
+    descript_dict = create_description(bvg_orig_dict)
     
+    create_tex_tables(descript_dict, './timeseries/plots/latex_output/', combined=True)
     
     
 if __name__  == '__main__' : 
