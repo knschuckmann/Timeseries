@@ -31,7 +31,7 @@ def load_data(path_to_file):
     
     result_frame = []
     for key in list(data):
-        result_frame.append(data[key])
+        result_frame.append(data[key].round(2))
 
     return result_frame
 
@@ -129,7 +129,8 @@ def plot_corr(data_frame, string_name, path):
     
     fig, ax = plt.subplots()
     im, cbar = heatmap(cormat, data_frame.columns, data_frame.columns, ax=ax,
-                   cmap="RdBu", cbarlabel="test")
+                   cmap="RdBu", cbarlabel="correlation")
+    ax.set_title('Correlation Matrix of ' + string_name[:-1])
     fig.tight_layout()
     
     save_fig(plt, string_name + 'corr', path)
@@ -139,7 +140,6 @@ def plot_hist(data_farem, string_column, string_name, path):
     plt.xlabel('Value Range')
     plt.ylabel('Amount')
     plt.title('Histogram of ' + string_column)
-    print(data_farem)
     save_fig(plt, string_name + string_column,path)
     
 def create_description(data_frame_dict):
@@ -155,17 +155,17 @@ def create_description_month(data_frame_dict):
     result = {}
     for data_key ,data_frame in data_frame_dict.items():
         temp_df_main = data_frame.describe().iloc[[0,1,2,3,7],]
-        result.update({data_key: temp_df_main})    
+        result.update({data_key: temp_df_main.round(2)})    
     return result     
 
-def create_tex_tables(dictionary, save_path, combined = False):    
+def create_tex_tables(dictionary, save_path_name, combined = False):    
     if combined:
         temp_dict = pd.DataFrame()
         for key, value in dictionary.items():
             temp_df = value.T
             temp_df.set_index([np.repeat(key,len(temp_df.index)), temp_df.index], inplace = True) 
             temp_dict = temp_dict.append(temp_df)
-        temp_dict.to_latex(save_path + 'combined.tex')
+        temp_dict.to_latex(save_path_name)
     else:    
         for key, value in dictionary.items():
             value.to_latex(save_path + key + '.tex')
@@ -177,8 +177,6 @@ def save_fig(fig, name, path_img):
     else:
         fig.savefig(path_img + name + '.eps', format='eps', bbox_inches='tight')     
         
-        
-        df_list = bvg_month_list
 
 def create_overall_monthly(df_list):
     temp_prod = df_list[0][['Produktnummer', 'Produkt-Bezeichnung', 'PGR','PGR-Bezeichnung']]
@@ -198,47 +196,49 @@ def create_overall_monthly(df_list):
     return temp
     
     
-#%%
-def main():
+def main(dayly_data = True, combine_tex = True, report_create = False):
     
-    bvg_orig_list = load_data(ORIG_DATA_PATH)
+    if dayly_data:
+        bvg_list = load_data(ORIG_DATA_PATH)
+        
+        einzel_aut , einzel_eigVkSt, einzel_privat, einzel_bus, einzel_app, tages_aut, tages_eigVkSt, tages_privat, tages_bus, tages_app = bvg_list    
     
-    einzel_aut , einzel_eigVkSt, einzel_privat, einzel_bus, einzel_app, tages_aut, tages_eigVkSt, tages_privat, tages_bus, tages_app = bvg_orig_list    
+        overall_data = create_overall_sum_df(bvg_list.copy())
+        
+        names = [name.strip() for name in 'einzel_aut , einzel_eigVkSt, einzel_privat, einzel_bus, einzel_app, tages_aut, tages_eigVkSt, tages_privat, tages_bus, tages_app'.split(',')]
+        
+        bvg_dict = {names[i]: bvg_list[i] for i in range(len(names))} 
+        bvg_dict.update({'overall_data': overall_data})
 
-    overall_data = create_overall_sum_df(bvg_orig_list.copy())
+        descript_dict = create_description(bvg_dict)
     
-    names = [name.strip() for name in 'einzel_aut , einzel_eigVkSt, einzel_privat, einzel_bus, einzel_app, tages_aut, tages_eigVkSt, tages_privat, tages_bus, tages_app'.split(',')]
+        create_tex_tables(descript_dict, './timeseries/plots/latex_output/combined_dayly.tex', combined = combine_tex)
+    else:        
+        bvg_list = load_data(MONTH_DATA_PATH)
     
-    bvg_orig_dict = {names[i]: bvg_orig_list[i] for i in range(len(names))} 
-    bvg_orig_dict.update({'overall_data': overall_data})
-
-
-    # for dic_key, dic_entry in bvg_orig_dict.items():
-    #     profile = ProfileReport(dic_entry, title="Pandas Profiling Report")
-    #     profile.to_file('./timeseries/plots/pandas_profiler' + dic_key + '.html')
+        vending_mashines, own_retailers, private_agencies, app = bvg_list 
+        
+        overall_data = create_overall_monthly(bvg_list)
+        
+        names_monthly = [name.strip() for name in 'vending_mashines, own_retailers, private_agencies, app'.split(',')]
+        bvg_dict = {names_monthly[i]: bvg_list[i] for i in range(len(names_monthly))} 
+        bvg_dict.update({'overall_monthly_data': overall_data})
+        
+        descript_month_dict = create_description_month(bvg_dict)
+        
+        create_tex_tables(descript_month_dict,'./timeseries/plots/latex_output/combined_monthly.tex', combined = combine_tex)
+   
+    if report_create:
+        for dic_key, dic_entry in bvg_dict.items():
+            profile = ProfileReport(dic_entry, title="Pandas Profiling Report")
+            profile.to_file('./timeseries/plots/pandas_profiler' + dic_key + '.html')
+        
+    # plot_corr(vending_mashines,'vending_mashines_', './timeseries/plots/correlation/' )
     
-    plot_corr(overall_data,'overall_data', './timeseries/plots/correlation/' )
+    #vending_mashines[vending_mashines.columns != ['Produkt-Bezeichnung', 'PGR', 'PGR-Bezeichnung'] ]
+    #plot_hist(vending_mashines.iloc[:,[4:]].T, 'Einzelfahrausweise außerhalb Berlin' ,'vending_mashines_', './timeseries/plots/histograms/' )
     
-    plot_hist(overall_data, 'Gesamt Menge in ST','overall_data', './timeseries/plots/histograms/' )
-    
-    descript_dict = create_description(bvg_orig_dict)
-    
-    create_tex_tables(descript_dict, './timeseries/plots/latex_output/', combined=True)
-    
-    bvg_month_list = load_data(MONTH_DATA_PATH)
-
-    vending_mashines, own_retailers, private_agencies, app = bvg_month_list 
-    
-    overall_monthly_data = create_overall_monthly(bvg_month_list)
-    
-    names_monthly = [name.strip() for name in 'vending_mashines, own_retailers, private_agencies, app'.split(',')]
-    bvg_month_dict = {names_monthly[i]: bvg_month_list[i] for i in range(len(names_monthly))} 
-    bvg_month_dict.update({'overall_:monthly_data': overall_monthly_data})
-    
-    descript_month_dict = create_description_month(bvg_month_dict)
-    
-    create_tex_tables(descript_month_dict,'./timeseries/plots/latex_output/', combined = True)
-    
+#%%  
 if __name__  == '__main__' : 
-    main()
+    main(dayly_data = False)
     
