@@ -11,6 +11,7 @@ import numpy as np
 import os
 from pandas_profiling import ProfileReport
 import matplotlib.pyplot as plt
+from sklearn.preprocessing import MinMaxScaler, Normalizer, StandardScaler, RobustScaler, PowerTransformer 
 
 
 
@@ -196,13 +197,74 @@ def create_overall_monthly(df_list):
     return temp
     
     
+def plot_datapoints_day(data_frame_1, header_string_List, range_number, savefig = False, path = './timeseries/plots/datapoints/' ):
+    x, y_1, y_2 = header_string_List
+    
+    # range_number = 30
+    # data_frame_1 = einzel_aut
+    # data_frame_2 = einzel_eigVkSt
+    # Header_string_List =['Verkaufsdatum', 'Einzel Menge in ST', '4Fahrt Menge in ST']
+    fig, ax = plt.subplots()
+    
+    min_max_scaler = Normalizer()
+    
+    df_1 = pd.DataFrame([data_frame_1[y_1][:range_number], data_frame_1[y_2][:range_number]])
+    df_1 = min_max_scaler.fit_transform(df_1) 
+    
+    ax.plot(data_frame_1[x][:range_number],df_1[0], label = y_1.split(' ')[0] )
+    ax.plot(data_frame_1[x][:range_number],df_1[1], label = y_2.split(' ')[0] )
+    
+    ax.legend()
+    ax.set_title(y_1.split(' ')[0] + ' and ' + y_2 + ' for ' + str(range_number) + ' datapoints')
+    ax.set_ylabel('normed values')
+    if savefig:
+        save_fig(fig, y_1.split(' ')[0] + '_' + str(range_number) +'_datapoints',path)
+    
+def plot_datapoints_month(data_frame_1, list_tickets, list_time, savefig = False, path = './timeseries/plots/datapoints/' ):
+
+    fig, ax = plt.subplots(2,1)
+    
+    df = data_frame_1.T
+    df.columns = data_frame_1.index
+    
+    for d in list(df):
+        if df.iloc[1,d] in list_tickets:
+            ax[0].plot( np.arange(0, df.shape[0] - 4 ), df.iloc[4:,d], label = df.iloc[1,d])
+    ax[0].set_title('Ticktes sold in time')
+    ax[0].set_xlabel('Time')
+    ax[0].legend(fontsize = 'x-small')
+    # df.iloc[np.arange(4,74)]
+    
+    # list_plot = ['Fahrausw.Kurzstr.BLN -BO', '4 Fahrten-Karte Kurzstrecke Berlin AB', '4 Fahrten-Karte Kurzstrecke Berlin AB ermäßigt']
+    normalizer = Normalizer()
+    df_1 = pd.DataFrame(data_frame_1[list_time].T)
+    df_1 = normalizer.fit_transform(df_1) 
+    df_1 = pd.DataFrame(df_1.T, columns = list_time)
+
+    for d in list(data_frame_1):
+        if d in list_time:
+            ax[1].plot(data_frame_1['Produktnummer'], df_1[d], label = d)
+    ax[1].set_title('Tickets sold for each month')
+    ax[1].set_xlabel('Productnumber')
+    ax[1].legend()
+    # ax.plot(data_frame_1[x][:range_number],df_1[1], label = y_2.split(' ')[0] )
+    
+    fig.tight_layout(pad=3.0)
+    if savefig:
+        save_fig(fig,'Monthly_datapoints',path)
+    
+    
+
 def main(dayly_data = True, combine_tex = True, report_create = False):
     
+
     if dayly_data:
         bvg_list = load_data(ORIG_DATA_PATH)
         
         einzel_aut , einzel_eigVkSt, einzel_privat, einzel_bus, einzel_app, tages_aut, tages_eigVkSt, tages_privat, tages_bus, tages_app = bvg_list    
     
+        plot_datapoints_day(einzel_aut , ['Verkaufsdatum', 'Einzel Menge in ST', '4Fahrt Menge in ST'], 365, True)
+        
         overall_data = create_overall_sum_df(bvg_list.copy())
         
         names = [name.strip() for name in 'einzel_aut , einzel_eigVkSt, einzel_privat, einzel_bus, einzel_app, tages_aut, tages_eigVkSt, tages_privat, tages_bus, tages_app'.split(',')]
@@ -210,6 +272,7 @@ def main(dayly_data = True, combine_tex = True, report_create = False):
         bvg_dict = {names[i]: bvg_list[i] for i in range(len(names))} 
         bvg_dict.update({'overall_data': overall_data})
 
+       
         descript_dict = create_description(bvg_dict)
     
         create_tex_tables(descript_dict, './timeseries/plots/latex_output/combined_dayly.tex', combined = combine_tex)
@@ -217,6 +280,8 @@ def main(dayly_data = True, combine_tex = True, report_create = False):
         bvg_list = load_data(MONTH_DATA_PATH)
     
         vending_mashines, own_retailers, private_agencies, app = bvg_list 
+        
+        plot_datapoints_month(vending_mashines,['Fahrausw.Kurzstr.BLN -BO', '4-Fahrten-Karte', 'Tageskte.BLN AB -B1T'], [ '201301', '201710'], True)
         
         overall_data = create_overall_monthly(bvg_list)
         
@@ -233,7 +298,8 @@ def main(dayly_data = True, combine_tex = True, report_create = False):
             profile = ProfileReport(dic_entry, title="Pandas Profiling Report")
             profile.to_file('./timeseries/plots/pandas_profiler' + dic_key + '.html')
         
-    # plot_corr(vending_mashines,'vending_mashines_', './timeseries/plots/correlation/' )
+      
+    # plot_corr(vending_mashines[col].T[1:39],'vending_mashines_', './timeseries/plots/correlation/' )
     
     #vending_mashines[vending_mashines.columns != ['Produkt-Bezeichnung', 'PGR', 'PGR-Bezeichnung'] ]
     #plot_hist(vending_mashines.iloc[:,[4:]].T, 'Einzelfahrausweise außerhalb Berlin' ,'vending_mashines_', './timeseries/plots/histograms/' )
