@@ -12,7 +12,7 @@ import os
 from pandas_profiling import ProfileReport
 import matplotlib.pyplot as plt
 from sklearn.preprocessing import MinMaxScaler, Normalizer, StandardScaler, RobustScaler, PowerTransformer 
-
+from dummy_plots_for_theory import save_fig, set_working_directory
 
 
 '''
@@ -134,14 +134,14 @@ def plot_corr(data_frame, string_name, path):
     ax.set_title('Correlation Matrix of ' + string_name[:-1])
     fig.tight_layout()
     
-    save_fig(plt, string_name + 'corr', path)
+    save_fig(string_name + 'corr', path, plt)
 
 def plot_hist(data_farem, string_column, string_name, path):    
     plt.hist(data_farem[string_column],density=False)
     plt.xlabel('Value Range')
     plt.ylabel('Amount')
     plt.title('Histogram of ' + string_column)
-    save_fig(plt, string_name + string_column,path)
+    save_fig(string_name + string_column,path,plt)
     
 def create_description(data_frame_dict):
     result = {}
@@ -172,11 +172,11 @@ def create_tex_tables(dictionary, save_path_name, combined = False):
             value.to_latex(save_path + key + '.tex')
     
 
-def save_fig(fig, name, path_img):
-    if not os.path.exists(path_img):
-        os.mkdir(path_img)
-    else:
-        fig.savefig(path_img + name + '.eps', format='eps', bbox_inches='tight')     
+# def save_fig(name, path_img, fig=None):
+#     if not os.path.exists(path_img):
+#         os.mkdir(path_img)
+#     else:
+#         fig.savefig(path_img + name + '.eps', format='eps', bbox_inches='tight')     
         
 
 def create_overall_monthly(df_list):
@@ -218,7 +218,7 @@ def plot_datapoints_day(data_frame_1, header_string_List, range_number, savefig 
     ax.set_title(y_1.split(' ')[0] + ' and ' + y_2 + ' for ' + str(range_number) + ' datapoints')
     ax.set_ylabel('normed values')
     if savefig:
-        save_fig(fig, y_1.split(' ')[0] + '_' + str(range_number) +'_datapoints',path)
+        save_fig(y_1.split(' ')[0] + '_' + str(range_number) +'_datapoints',path, fig)
     
 def plot_datapoints_month(data_frame_1, list_tickets, list_time, savefig = False, path = './timeseries/plots/datapoints/' ):
 
@@ -251,13 +251,13 @@ def plot_datapoints_month(data_frame_1, list_tickets, list_time, savefig = False
     
     fig.tight_layout(pad=3.0)
     if savefig:
-        save_fig(fig,'Monthly_datapoints',path)
+        save_fig('Monthly_datapoints',path,fig)
     
     
 
 def main(dayly_data = True, combine_tex = True, report_create = False):
+    set_working_directory()
     
-
     if dayly_data:
         bvg_list = load_data(ORIG_DATA_PATH)
         
