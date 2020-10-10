@@ -9,7 +9,7 @@ Created on Wed May 13 13:12:24 2020
 # Global variables 
 path_csv = '../resource_data/dummy/temperature/Bias_correction_ucl.csv'
 path_img1 = '../../Latex/bhtThesis/Masters/2_fundamentals/pictures'
-path_img2 = '../../Latex/bhtThesis/Masters/3_used_Models/pictures'
+path_img2 = '../../Latex/bhtThesis/Masters/3_used_Models/pictures/'
 
 
 # Important imports
@@ -17,10 +17,10 @@ import os
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
-import statsmodels.api as sm
+#import statsmodels.api as sm
 import scipy.stats as stats
-from statsmodels.graphics.tsaplots import plot_acf, plot_pacf
-from statsmodels.tsa.stattools import acf, pacf
+#from statsmodels.graphics.tsaplots import plot_acf, plot_pacf
+#from statsmodels.tsa.stattools import acf, pacf
 
 
 
@@ -234,3 +234,35 @@ if __name__ == '__main__':
     
     plt.savefig(path_img2 + '/ar_simulate.eps', format='eps', bbox_inches='tight')
         
+    #%%
+    # PLOT Sigmoid and Step functions
+    # Step function
+    x = np.arange(-4,5,1)
+    y = sum([list(np.repeat(0,5)), list(np.repeat(1,4))],[])
+    
+    fig, ax = plt.subplots()
+    ax.plot(x,y, drawstyle='steps-pre')
+    ax.set_title('step function')
+    ax.set_xlabel('Z')
+    ax.set
+    #fig.show()
+    save_fig('step_function', path_img2)
+    
+    # Sigmoid function
+    x = np.linspace(-4,4,100)
+    y =  1/(1 + np.exp(-x)) 
+    
+    fig, ax = plt.subplots()
+    ax.plot(x,y)
+    ax.set_title('sigmoid function')
+    ax.set_xlabel('Z')
+    ax.set
+    #fig.show()
+    save_fig('sigmoid_function', path_img2)
+    
+    #%%
+    
+    
+    
+    
+    

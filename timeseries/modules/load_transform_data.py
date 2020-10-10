@@ -296,7 +296,7 @@ def main(dayly_data = True, combine_tex = True, report_create = False):
     if report_create:
         for dic_key, dic_entry in bvg_dict.items():
             profile = ProfileReport(dic_entry, title="Pandas Profiling Report")
-            profile.to_file('./timeseries/plots/pandas_profiler' + dic_key + '.html')
+            profile.to_file('./timeseries/plots/pandas_profiler/' + dic_key + '.html')
         
       
     # plot_corr(vending_mashines[col].T[1:39],'vending_mashines_', './timeseries/plots/correlation/' )
