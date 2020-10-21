@@ -3,7 +3,7 @@
 """
 Created on Wed May 13 13:12:24 2020
 
-@author: Kostja
+@author: Konstantin Schuckmann
 """
 
 
@@ -12,12 +12,11 @@ import os
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
-import statsmodels.api as sm
-import scipy.stats as stats
-from config import dummy_temperature_path, dummy_flight_path, \
+# import statsmodels.api as sm
+# import scipy.stats as stats
+from timeseries.modules.config import dummy_temperature_path, dummy_flight_path, \
     dummy_save_path_section_2, dummy_save_path_section_3
 from statsmodels.graphics.tsaplots import plot_acf, plot_pacf
-from statsmodels.tsa.stattools import acf, pacf
 
 
 def save_fig(name, path_img, fig = None):

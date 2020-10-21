@@ -12,29 +12,40 @@ import os
 from pandas_profiling import ProfileReport
 import matplotlib.pyplot as plt
 from sklearn.preprocessing import MinMaxScaler, Normalizer, StandardScaler, RobustScaler, PowerTransformer 
-from dummy_plots_for_theory import save_fig, set_working_directory
-
+from timeseries.modules.dummy_plots_for_theory import save_fig, set_working_directory
+from timeseries.modules.config import ORIG_DATA_PATH, MONTH_DATA_PATH
 
 '''
 - habe die daten in csv umgewandelt und in eine Exle eingefügt. überwiegend mit exel die gesamt transformation gemacht
 - weil daten in einem excel makro format vorlagen musste ich diese in eine für python bessere Form bringen
 '''
-ORIG_DATA_PATH = './timeseries/resource_data/original/Transformed Daten Beuth 2019.03.15.xlsx'
-MONTH_DATA_PATH = './timeseries/resource_data/original/Monatsdaten ab 2012_fuer FC-V_in Stueck-1_CLEANED.xlsx'
+# ORIG_DATA_PATH = './timeseries/resource_data/original/Transformed Daten Beuth 2019.03.15.xlsx'
+# MONTH_DATA_PATH = './timeseries/resource_data/original/Monatsdaten ab 2012_fuer FC-V_in Stueck-1_CLEANED.xlsx'
 
 
-def load_data(path_to_file):
+def load_transform_excel(path_to_file):
+    '''
+    Parameters
+    ----------
+    path_to_file : String
+        Path to the excel-file
+
+    Returns
+    -------
+    result_frame : List of Data Frames
+        Returns a list where each Excel sheet becomes a Dataframe
+    '''
     
     # create excel file document
     file = pd.ExcelFile(path_to_file)
     
     data = pd.read_excel(path_to_file, sheet_name = file.sheet_names)
     
-    result_frame = []
+    result_list = []
     for key in list(data):
-        result_frame.append(data[key].round(2))
+        result_list.append(data[key].round(2))
 
-    return result_frame
+    return result_list
 
 
 
@@ -172,13 +183,6 @@ def create_tex_tables(dictionary, save_path_name, combined = False):
             value.to_latex(save_path + key + '.tex')
     
 
-# def save_fig(name, path_img, fig=None):
-#     if not os.path.exists(path_img):
-#         os.mkdir(path_img)
-#     else:
-#         fig.savefig(path_img + name + '.eps', format='eps', bbox_inches='tight')     
-        
-
 def create_overall_monthly(df_list):
     temp_prod = df_list[0][['Produktnummer', 'Produkt-Bezeichnung', 'PGR','PGR-Bezeichnung']]
     for num in df_list:
@@ -259,7 +263,7 @@ def main(dayly_data = True, combine_tex = True, report_create = False):
     set_working_directory()
     
     if dayly_data:
-        bvg_list = load_data(ORIG_DATA_PATH)
+        bvg_list = load_transform_excel(ORIG_DATA_PATH)
         
         einzel_aut , einzel_eigVkSt, einzel_privat, einzel_bus, einzel_app, tages_aut, tages_eigVkSt, tages_privat, tages_bus, tages_app = bvg_list    
     
@@ -277,7 +281,7 @@ def main(dayly_data = True, combine_tex = True, report_create = False):
     
         create_tex_tables(descript_dict, './timeseries/plots/latex_output/combined_dayly.tex', combined = combine_tex)
     else:        
-        bvg_list = load_data(MONTH_DATA_PATH)
+        bvg_list = load_transform_excel(MONTH_DATA_PATH)
     
         vending_mashines, own_retailers, private_agencies, app = bvg_list 
         
