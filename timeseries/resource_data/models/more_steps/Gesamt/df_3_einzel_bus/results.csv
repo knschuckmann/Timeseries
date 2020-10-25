@@ -1,0 +1,6 @@
+,Used Model,Model,MSE,RMSE,Orders
+0,persistance,,275468060.32,16597.23,
+1,ARMA,<statsmodels.tsa.arima_model.ARMAResultsWrapper object at 0x12a9c78e0>,105722943.36,10282.17,"{'AR': 3, 'MA': 3}"
+2,ARIMA,<statsmodels.tsa.arima.model.ARIMAResultsWrapper object at 0x12aec77f0>,106093861.07,10300.19,"{'AR': 4, 'MA': 3}"
+3,SARIMAX,<statsmodels.tsa.statespace.sarimax.SARIMAXResultsWrapper object at 0x12aec7be0>,159036761.68,12610.98,"{'AR': 4, 'MA': 3, 'SAR': 7, 'SMA': 1, 'S': 7}"
+4,ARMA,<statsmodels.tsa.arima_model.ARMAResultsWrapper object at 0x12a9c78e0>,105722943.36,10282.17,"{'AR': 3, 'MA': 3}"
