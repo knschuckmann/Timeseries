@@ -220,7 +220,8 @@ def compare_models(given_model, data, diff_faktor, rolling_window, forecast_one_
     if given_model == 'persistance':   
         predictions = sum(predictions, [])
     else:
-        predictions = predictions[0]
+        if not forecast_one_step:
+            predictions = predictions[0]
     result['MSE'] = np.round(mean_squared_error(splitted_data['Test'][:,0], predictions, squared = True),2)
     result['RMSE'] = np.round(mean_squared_error(splitted_data['Test'][:,0], predictions, squared = False),2)
     print('RMSE: %.3f' % result['RMSE'])
