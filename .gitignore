@@ -1,2 +1,3 @@
 timeseries/resource_data/original/
 timeseries/plots/
+*.pkl
