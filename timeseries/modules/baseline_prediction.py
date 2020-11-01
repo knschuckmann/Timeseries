@@ -250,7 +250,7 @@ def combine_dataframe(data_frame_with_all_data, monthly= False, output_print = F
     result_df[list(set(head_names) - set(['Tages Menge in ST']))] = df1[list(set(head_names) - set(['Tages Menge in ST']))]
     result_df['Tages Menge in ST'] = np.zeros(result_df.shape[0], dtype = int)
     
-    for df in tqdm(data_frame[1:]):
+    for df in tqdm(data_frame_with_all_data[1:]):
         df.index = df['Verkaufsdatum']
     
         temp_df = df
