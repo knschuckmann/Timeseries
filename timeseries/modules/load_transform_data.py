@@ -11,9 +11,13 @@ import numpy as np
 import os
 from pandas_profiling import ProfileReport
 import matplotlib.pyplot as plt
+from bs4 import BeautifulSoup
+import requests
+import datetime
+from tqdm import tqdm
 from sklearn.preprocessing import MinMaxScaler, Normalizer, StandardScaler, RobustScaler, PowerTransformer 
 from timeseries.modules.dummy_plots_for_theory import save_fig, set_working_directory
-from timeseries.modules.config import ORIG_DATA_PATH, MONTH_DATA_PATH
+from timeseries.modules.config import ORIG_DATA_PATH, MONTH_DATA_PATH, ORIGINAL_PATH
 
 '''
 - habe die daten in csv umgewandelt und in eine Exle eingefügt. überwiegend mit exel die gesamt transformation gemacht
@@ -257,7 +261,25 @@ def plot_datapoints_month(data_frame_1, list_tickets, list_time, savefig = False
     if savefig:
         save_fig('Monthly_datapoints',path,fig)
     
+
+def scrape_save_events_gratis_in_berlin(df):
+    # https://www.gratis-in-berlin.de/kalender/tagestipps/
+    number_free_events = pd.DataFrame(columns = ['date', 'amount free events'])
+    time = df.index
     
+    for t in tqdm(time):
+        req = requests.get('https://www.gratis-in-berlin.de/kalender/tagestipps/' + str(t.year) + '-' + str(t.month) +'-' + str(t.day))
+        
+        soup = BeautifulSoup(req.text, 'html.parser')
+    
+        head_class = soup.find("ul", class_ = "leadingblock")
+        
+        df_temp = {'date':t,'amount free events':sum(1 for li in head_class)}
+        
+        number_free_events = number_free_events.append(df_temp, ignore_index=True)
+        
+    number_free_events.to_csv(ORIGINAL_PATH + 'events1.csv', sep=';')
+
 
 def main(dayly_data = True, combine_tex = True, report_create = False):
     set_working_directory()

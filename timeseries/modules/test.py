@@ -416,9 +416,657 @@ mean_squared_error(y_test, prediction)
 tf.compat.v1.placeholder(tf.float32, shape=(1024, 1024))
 inputs = tf.placeholder(tf.float32, [32,7,1])
 targets = tf.placeholder(tf.float32, [32,1])
+#%%%
+###### EXAMPLE PREPARE DATA LSTM ###
+
+import numpy as np
+import datetime
+# load...
+data = list()
+n = 5000
+for i in range(n):
+	data.append([i+1, (i+1)*10])
+data = np.array(data)
+print(data[:5, :])
+print(data.shape) 
+
+# drop time
+data = data[:, 1]
+print(data.shape)
+samples = list()
+length = 200
+# step over the 5,000 in jumps of 200
+for i in range(0,n,length):
+	# grab from i to i + 200
+	sample = data[i:i+length]
+	samples.append(sample)
+print(len(samples))
+# convert list of arrays into 2d array
+data = np.array(samples)
+print(data.shape)
+# reshape into [samples, timesteps, features]
+# expect [25, 200, 1]
+data = data.reshape((len(samples), length, 1))
+print(data.shape)
+
+
+
+lstm_model = tf.keras.models.Sequential([
+    # Shape [batch, time, features] => [batch, time, lstm_units]
+    tf.keras.layers.LSTM(200, return_sequences=False),
+    tf.keras.layers.Dropout(.2),
+    # Shape => [batch, time, features]
+    tf.keras.layers.Dense(units=1)
+])
+
+lstm_model.compile(loss='mean_squared_error', optimizer='adam')
+lstm_model.fit(data, epochs=30, batch_size=20, verbose=1)
+
+
+
+
+
+
+
+
+
+df.index
+orig = np.array(df[df.columns[1]])
+print(orig[:5])
+
+
+# check if missing values 
+time_seq = np.arange(datetime.date(2017,1,1),datetime.date(2019,3,13), datetime.timedelta(days=1))
+for seq in time_seq:
+    if seq not in df.index:
+        print(seq)
+#%%
+    
+import os
+import datetime
+
+# import IPython
+# import IPython.display
+import matplotlib as mpl
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+# import seaborn as sns
+import tensorflow as tf   
+from sklearn.preprocessing import MinMaxScaler, StandardScaler
+from sklearn.metrics import mean_squared_error
+
+
+from timeseries.modules.config import ORIG_DATA_PATH, SAVE_PLOTS_PATH, SAVE_MODELS_PATH, DATA, SAVE_RESULTS_PATH, ORIGINAL_PATH
+from timeseries.modules.dummy_plots_for_theory import save_fig, set_working_directory
+from timeseries.modules.load_transform_data import load_transform_excel
+from timeseries.modules.baseline_prediction import combine_dataframe, monthly_aggregate, split
+
+def cerate_lstm(layers_count=2, batch_size_list=[64, 64], dropout=0.2, **kwargs):
+    
+    model = tf.keras.Sequential()
+    
+    batch_size_list = [3]
+    for number in range(len(batch_size_list) -1):
+        model.add(tf.keras.layers.LSTM(batch_size_list[number], return_sequences=True ,**kwargs))
+        if dropout > 0:
+            model.add(tf.keras.layers.Dropout(dropout))
+    
+    model.add(tf.keras.layers.LSTM(batch_size_list[-1], return_sequences=False,**kwargs))
+    if dropout > 0:
+        model.add(tf.keras.layers.Dropout(dropout))
+    
+    model.add(tf.keras.layers.Dense(units = 2))
+    
+    return model
+
+def compile_and_fit(model, epochs, X_train,y_train, X_val, y_val, patience = 3, **kwargs):        
+    early_stopping = tf.keras.callbacks.EarlyStopping(monitor='val_loss',
+                                                      patience=patience,
+                                                      mode='min')
+    model.compile(loss=tf.losses.MeanSquaredError(), optimizer=tf.optimizers.Adam(),
+                  metrics=[tf.metrics.MeanAbsoluteError()])
+
+    return model.fit(X_train, y_train, epochs=epochs, validation_data=(X_val, y_val),
+                        callbacks=[early_stopping], **kwargs)
+    
+def set_index_in_df_list(dataframe):
+    for nr, data in enumerate(dataframe):
+        data_frame[nr] = data.set_index(data['Verkaufsdatum'], drop = True)
+    return dataframe 
+
+
+def remove_unimportant_columns(all_columns, column_list):
+    
+    result_columns = set(all_columns)
+    for column in column_list:
+        try:
+            result_columns -= set([column])
+        except:
+            continue
+    return result_columns
+ 
+
+def train_val_test(data, rel_train, rel_val):
+    length = len(data)
+    size_train = int(length*rel_train)
+    size_test = int(length*rel_val)    
+    # train, val, test
+    return data[:size_train], data[size_train:size_test], data[size_test:]
+    
+
+def scale_data_to_standrad(scale_method, train, test, val):
+    # fit scaler
+    scaler = scale_method
+    scaler = scaler.fit(train)
+    # transform train
+    train_set = scaler.transform(train)
+    test_set = scaler.transform(test)
+    val_set = scaler.transform(val)
+    
+    return scaler, train_set, test_set, val_set
+
+def check_if_column_right_place(column, dataframe):
+    
+    first_series  = dataframe[dataframe.columns[np.where(dataframe.columns == column)]]
+    other_series = dataframe[dataframe.columns[np.where(dataframe.columns != column)]]
+    
+    return first_series.merge(other_series, left_on='date', right_on= 'date')
+
+def reshape_array(numpy_array, timesteps):
+    
+    new_list = [numpy_array[x:x+timesteps] for x in range(int(np.ceil(numpy_array.shape[0]/timesteps)))]
+    return np.array(new_list)
+
+def series_to_supervised(data_frame, n_in=1, n_out=1, dropnan=True):
+    
+    n_vars = 1 if type(data_frame) is list else data_frame.shape[1]
+    names_list = data_frame.columns
+    cols, names = list(), list()
+	# input sequence (t-n, ... t-1)
+    for i in range(n_in, 0, -1):
+        cols.append(data_frame.shift(i))
+        names += [(names_list[j] + '(t-%d)' % (i)) for j in range(n_vars)]
+    # forecast sequence (t, t+1, ... t+n)
+    for i in range(0, n_out):
+        cols.append(data_frame[names_list[0]].shift(-i))
+        if i == 0:
+            names.append(names_list[0] + '(t)')
+        else:
+            names.append(names_list[0] + '(t+%d)' % (i))
+	# put it all together
+    agg = pd.concat(cols, axis=1)
+    agg.columns = names
+	# drop rows with NaN values
+    if dropnan:
+        agg.dropna(inplace=True)
+    return agg
+
+
+set_working_directory()
+data_frame = load_transform_excel(ORIG_DATA_PATH)
+events = pd.read_excel(ORIGINAL_PATH + 'events.xlsx')
+try:
+    ran
+except:
+    combined_m_df, combined_df = combine_dataframe(data_frame, monthly = True)
+    monthly_list = list()
+    for df in data_frame:
+        monthly_list .append(monthly_aggregate(df, combined = True))
+    data_frame = set_index_in_df_list(data_frame)
+    ran = True 
+
+
+features = 2
+timesteps = 2
+time_vars = timesteps *df.shape[1]
+feat_vars = features *df.shape[1]
+max_vars = time_vars + feat_vars
+take_column = 'Einzel Menge in ST'
+
+# set the DataFrame to predict 
+data_orig = pd.DataFrame(combined_df[take_column], columns = [take_column])
+
+data_orig = data_orig.merge(events, left_on =data_orig.index, right_on='date')
+data_orig = data_orig.set_index(data_orig['date'], drop = True, verify_integrity= True)
+data_orig = data_orig.drop('date', axis = 1)
+
+used_columns = remove_unimportant_columns(data_orig.columns, ['Verkaufsdatum','Tages Wert in EUR','Einzel Wert in EUR','4Fahrt Wert in EUR', 'Gesamt Wert in EUR'])
+df = data_orig[used_columns] 
+df = check_if_column_right_place(column = take_column, dataframe = df)   
+
+reframed = series_to_supervised(df, n_in = features, n_out = timesteps)
+
+
+# Split data 
+train_df, val_df, test_df = train_val_test(reframed, rel_train = .7, rel_val = .9)
+
+# scale data
+scaler, sc_train, sc_test, sc_val = scale_data_to_standrad(MinMaxScaler(feature_range=(0, 1)), train_df, test_df, val_df)
+# sc_train_df = pd.DataFrame(sc_train, columns=train_df.columns, index = train_df.index)
+# sc_test_df = pd.DataFrame(sc_test, columns=test_df.columns, index = test_df.index)
+# sc_val_df = pd.DataFrame(sc_val, columns=val_df.columns, index = val_df.index)
+
+train_df.shape
+# split into input and outputs
+train_X, train_y = sc_train[:, :-timesteps], sc_train[:, -timesteps:]
+val_X, val_y = sc_val[:, :-timesteps], sc_val[:, -timesteps:]
+test_X, test_y = sc_test[:, :-timesteps], sc_test[:, -timesteps:]
+print(train_X.shape, train_y.shape, val_X.shape, val_y.shape,  test_X.shape, test_y.shape)
+
+
+'''
+sequence_length: Length of the output sequences (in number of timesteps).
+batch_size: Number of timeseries samples in each batch (except maybe the last one).
+'''
+new = tf.keras.preprocessing.timeseries_dataset_from_array(data = train_X, targets = train_y, 
+                                                           sequence_length = timesteps, batch_size=16)
+
+new_val = tf.keras.preprocessing.timeseries_dataset_from_array(data = val_X, targets = val_y, 
+                                                           sequence_length = timesteps, batch_size=16)
+
+
+new_test = tf.keras.preprocessing.timeseries_dataset_from_array(data = test_X, targets = test_y, 
+                                                           sequence_length = timesteps, batch_size=16)
+
+for i in new_test:
+    print('i_0: ',i[0].shape)
+    print('i_1: ',i[1].shape)
+
+
+train_X = reshape_array(train_X, timesteps)
+val_X = reshape_array(val_X, timesteps)
+test_X = reshape_array(test_X, timesteps)
+
+train_y = reshape_array(train_y, timesteps)
+val_y = reshape_array(val_y, timesteps)
+test_y = reshape_array(test_y, timesteps)
+print(train_X.shape, train_y.shape, val_X.shape, val_y.shape,  test_X.shape, test_y.shape )
+
+# print(train_X.shape, train_y.shape)
+# reshape input to be 3D [samples, timesteps, features]
+# train_X = train_X.reshape(train_X.shape[0], timesteps, train_X.shape[1])
+# val_X = val_X.reshape(val_X.shape[0], timesteps, val_X.shape[1])
+# test_X = test_X.reshape(test_X.shape[0], timesteps, test_X.shape[1])
+
+# We reshaped the input into the 3D format as expected by LSTMs, namely [samples, timesteps, features].
+lstm_model = cerate_lstm(layers_count = 1, batch_size_list=[100], dropout=.2)
+# history = compile_and_fit(model = lstm_model, epochs = 40, X_train = train_X, 
+#                 y_train = train_y, X_val = val_X, y_val= val_y, verbose = 1, batch_size = timesteps)
+
+
+early_stopping = tf.keras.callbacks.EarlyStopping(monitor='val_loss',
+                                                      patience=3,
+                                                      mode='min')
+lstm_model.compile(loss=tf.losses.MeanSquaredError(), optimizer=tf.optimizers.Adam(),
+              metrics=[tf.metrics.MeanAbsoluteError()])
+
+lstm_model.fit(new, epochs=40, validation_data=new_val,
+                        callbacks=[early_stopping])
+
+lstm_model.evaluate(new_test)
+yhat = lstm_model.predict(new_test)
+
+inputs, targets = tf.data.experimental.get_single_element(new_test.take(1))
+
+
+
+tf.keras.preprocessing.sequence.pad_sequences(train_y)
+inputs.shape
+targets.shape
+
+scaler.inverse_transform(yhat)
+# make a prediction
+# yhat = lstm_model.predict(test_X)
+test_X = test_X[:-1]
+test_X = test_X.reshape((test_X.shape[0], feat_vars))
+
+yhat.shape
+test_X.shape
+
+inv_yhat = np.concatenate((yhat, test_X), axis=1)
+inv_yhat.shape
+# invert scaling for forecast
+inv_yhat = np.concatenate((yhat, test_X[:,-feat_vars:]), axis=1)
+inv_yhat = scaler.inverse_transform(inv_yhat)
+inv_yhat = inv_yhat[:,:2]
+
+
+pd.DataFrame(inv_yhat)
+
+# invert scaling for actual values
+test_y = test_y.reshape((len(test_y), 1))
+inv_y = np.concatenate((test_y, test_X[:, -feat_vars:]), axis=1)
+inv_y = scaler.inverse_transform(inv_y)
+inv_y = inv_y[:,0]
+
+plt.plot(inv_y)
+test_y = new_test
+# calculate RMSE
+rmse = np.sqrt(mean_squared_error(inv_y, inv_yhat))
+print('Test RMSE: %.3f' % rmse)
+
+performance = {}
+performance['MSE'] = lstm_model.evaluate(new_test, verbose=1)
+performance['RMSE'] = np.sqrt(performance['MSE'][0])
+
+test_y_1 = test_y.reshape((len(test_y), 1))
+
+test_y_1 = test_y[:-1]
+test_X_1 = test_X
+
+test_y_1 = test_y_1[:,1:2]
+test_y_1.shape
+inv_y = np.concatenate((test_y_1, test_X_1), axis=1)
+
+sc_test.inverse_transform()
+pd.DataFrame(inv_y)
+inv_y = scaler.inverse_transform(inv_y)
+inv_y = inv_y[:,:2]
+
+for i in range(2):
+    rmse = np.sqrt(mean_squared_error(inv_y[:,i], inv_yhat[:,i]))
+    print('Test RMSE: %.3f' % rmse)
+
 
 
 #%%
+# combined_df.shape
+# values = combined_df.values 
 
-# load...
+df = df[[df.columns[4], df.columns[0], df.columns[1], df.columns[2], df.columns[3]]]
+
+df.shape
+values = df.values
+
+
+scaler = MinMaxScaler(feature_range=(0, 1))
+# scaler = MinMaxScaler(feature_range=(0, 1))
+print(values.shape)
+print(values_1.shape)
+
+
+# frame as supervised learning
+
+features = 2
+timesteps = 1
+time_vars = timesteps *df.shape[1]
+feat_vars = features *df.shape[1]
+max_vars = time_vars + feat_vars
+
+
+
+reframed_train = series_to_supervised(values,df.columns,  features, timesteps)
+print(reframed_train.shape)
+print(reframed_1.shape)
+
+# reframed_val = series_to_supervised(scaled,sc_val_df.columns,  features, timesteps)
+# reframed_test = series_to_supervised(scaled,sc_test_df.columns,  features, timesteps)
+# # drop columns we don't want to predict
+reframed_train.drop(reframed_train.columns[np.arange(feat_vars + 1, max_vars , 1)], axis=1, inplace=True)
+# reframed_val.drop(reframed_val.columns[np.arange(feat_vars + 1,max_vars,1)], axis=1, inplace=True)
+# reframed_test.drop(reframed_test.columns[np.arange(feat_vars + 1,max_vars,1)], axis=1, inplace=True)
+print(reframed_train.shape)
+print(reframed_1.shape)
+
+
+scaled = scaler.fit_transform(reframed_train)
+print(scaled.shape)
+print(scaled_1.shape)
+
+
+values_new = scaled
+
+print(reframed_train.head())
+print(reframed_1.head())
+# split into train and test sets
+# values_new = reframed_train.values
+print(values_new.shape)
+print(values_2.shape)
+
+n_train_time = int(df.shape[0]*.7)
+n_val_time = int(df.shape[0]*.9)
+
+
+train, val, test = train_val_test(values_new,.7,.9)
+
+print(train.shape, val.shape, test.shape) 
+print(train_1.shape, val_1.shape, test_1.shape) 
+
+##test = values[n_train_time:n_test_time, :]
+# split into input and outputs
+train_X, train_y = train[:, :-1], train[:, -1]
+val_X, val_y = val[:, :-1], val[:, -1]
+test_X, test_y = test[:, :-1], test[:, -1]
+print(train_X.shape, train_y.shape, val_X.shape, val_y.shape,  test_X.shape, test_y.shape ) 
+print(train_X_1.shape, train_y_1.shape, val_X_1.shape, val_y_1.shape,  test_X_1.shape, test_y_1.shape ) 
+
+# reshape input to be 3D [samples, timesteps, features]
+train_X_res = train_X.reshape(train_X.shape[0], timesteps, train_X.shape[1])
+val_X_res = val_X.reshape(val_X.shape[0], timesteps, val_X.shape[1])
+test_X_res = test_X.reshape(test_X.shape[0], timesteps, test_X.shape[1])
+
+print(train_X_res.shape, train_y.shape, val_X_res.shape, val_y.shape,  test_X_res.shape, test_y.shape ) 
+print(train_X_res_1.shape, train_y_1.shape, val_X_res_1.shape, val_y_1.shape,  test_X_res_1.shape, test_y_1.shape ) 
+
+
+# We reshaped the input into the 3D format as expected by LSTMs, namely [samples, timesteps, features].
+lstm_model = cerate_lstm(layers_count = 1, batch_size_list=[100], dropout=.2)
+history = compile_and_fit(model = lstm_model, epochs = 40, X_train = train_X_res, 
+                y_train = train_y, X_val = val_X_res, y_val= val_y, verbose = 1)
+
+
+# lstm_model.save('model_hey')
+# new = tf.keras.models.load_model('model_hey')
+
+# summarize history for loss
+plt.plot(history.history['loss'])
+plt.plot(history.history['val_loss'])
+plt.title('model loss')
+plt.ylabel('loss')
+plt.xlabel('epoch')
+plt.legend(['train', 'validation'], loc='upper right')
+plt.show()
+
+
+
+# make a prediction
+yhat = lstm_model.predict(test_X_res)
+test_X_res_res = test_X_res.reshape((test_X_res.shape[0], 10))
+print(yhat.shape, test_X_res_res.shape)
+print(yhat_1.shape, test_X_res_res_1.shape)
+# invert scaling for forecast
+inv_yhat = np.concatenate((yhat, test_X_res_res[:,-(10):]), axis=1)
+print(inv_yhat.shape)
+print(inv_yhat_1.shape)
+
+inv_yhat_new = scaler.inverse_transform(inv_yhat)
+print(inv_yhat_new.shape)
+print(inv_yhat_2.shape)
+inv_yhat_new_1 = inv_yhat_new[:,0]
+print(inv_yhat_new_1.shape)
+print(inv_yhat_3.shape)
+
+# invert scaling for actual
+test_y_new = test_y.reshape((len(test_y), 1))
+inv_y = np.concatenate((test_y_new, test_X_res_res[:, -(feat_vars):]), axis=1)
+print(test_y_new.shape, inv_y.shape)
+print(test_y_res.shape, inv_y_1.shape)
+
+inv_y_new = scaler.inverse_transform(inv_y)
+print(inv_y_new.shape)
+print(inv_y_2.shape)
+
+inv_y_new_1 = inv_y_new[:,0]
+print(inv_y_new_1.shape)
+print(inv_y_3.shape)
+# calculate RMSE
+rmse = np.sqrt(mean_squared_error(inv_y_new_1, inv_yhat_new_1))
+print('Test RMSE: %.3f' % rmse)
+
+# lstm_model.summary()
+# plt.plot(inv_yhat, label = 'pred')
+# plt.plot(inv_y,label = 'orig')
+# plt.legend(loc = 'best')
+
+#%%
+## Original
+values_1 = df.values
+
+
+## full data without resampling
+#values = df.values
+
+# integer encode direction
+# ensure all data is float
+#values = values.astype('float32')
+# normalize features
+scaler_1 = MinMaxScaler(feature_range=(0, 1))
+print(values_1.shape)
+
+scaled_1 = scaler_1.fit_transform(values_1)
+# frame as supervised learning
+reframed_1 = series_to_supervised(scaled_1, df.columns, 1, 1)
+
+# drop columns we don't want to predict
+reframed_1.drop(reframed_1.columns[[6,7,8,9]], axis=1, inplace=True)
+print(reframed_1.head())
+
+values_2 = reframed_1.values
+print(values_2.shape)
+
+n_train_time = int(df.shape[0]*.7)
+n_val_time = int(df.shape[0]*.9)
+
+train_1 = values_2[:n_train_time, :]
+val_1 = values_2[n_train_time:n_val_time, :]
+test_1 = values_2[n_val_time:, :]
+print(train_1.shape, val_1.shape, test_1.shape) 
+
+##test = values[n_train_time:n_test_time, :]
+# split into input and outputs
+train_X_1, train_y_1 = train_1[:, :-1], train_1[:, -1]
+test_X_1, test_y_1 = test_1[:, :-1], test_1[:, -1]
+val_X_1, val_y_1 = val_1[:, :-1], val_1[:, -1]
+print(train_X_1.shape, train_y_1.shape, val_X_1.shape, val_y_1.shape,  test_X_1.shape, test_y_1.shape ) 
+
+# reshape input to be 3D [samples, timesteps, features]
+'''if more steps probably need to shift um die steps'''
+train_X_res_1 = train_X_1.reshape((train_X_1.shape[0], 1, train_X_1.shape[1]))
+test_X_res_1 = test_X_1.reshape((test_X_1.shape[0], 1, test_X_1.shape[1]))
+val_X_res_1 = val_X_1.reshape((val_X_1.shape[0], 1, val_X_1.shape[1]))
+print(train_X_res_1.shape, train_y_1.shape, val_X_res_1.shape, val_y_1.shape,  test_X_res_1.shape, test_y_1.shape ) 
+
+
+
+lstm_model_1 = cerate_lstm(layers_count = 1, batch_size_list=[100], dropout=.2)
+history = compile_and_fit(model = lstm_model_1, epochs = 40, X_train = train_X_res_1, 
+                y_train = train_y_1, X_val = val_X_res_1, y_val= val_y_1, verbose = 0)
+
+yhat_1 = lstm_model_1.predict(test_X_res_1)
+test_X_res_res_1 = test_X_res_1.reshape((test_X_res_1.shape[0], 5))
+print(yhat_1.shape, test_X_res_res_1.shape)
+
+# invert scaling for forecast
+inv_yhat_1 = np.concatenate((yhat_1, test_X_res_res_1[:, -4:]), axis=1)
+print(inv_yhat_1.shape) # concated to -1 as the original
+
+inv_yhat_2 = scaler_1.inverse_transform(inv_yhat_1)
+print(inv_yhat_2.shape)
+
+inv_yhat_3 = inv_yhat_2[:,0]
+print(inv_yhat_3.shape)
+# invert scaling for actual
+test_y_res = test_y_1.reshape((len(test_y_1), 1))
+inv_y_1 = np.concatenate((test_y_res, test_X_res_res_1[:, -4:]), axis=1)
+print(test_y_res.shape, inv_y_1.shape)
+inv_y_2 = scaler.inverse_transform(inv_y_1)
+print(inv_y_2.shape)
+inv_y_3 = inv_y_2[:,0]
+print(inv_y_3.shape)
+# calculate RMSE
+rmse = np.sqrt(mean_squared_error(inv_y_3, inv_yhat_3))
+print('Test RMSE: %.3f' % rmse)
+
+#%%
+
+## Univariate
+values_1 = df['Einzel Menge in ST'].values
+
+
+## full data without resampling
+#values = df.values
+
+# integer encode direction
+# ensure all data is float
+#values = values.astype('float32')
+# normalize features
+scaler_1 = MinMaxScaler(feature_range=(0, 1))
+print(values_1.shape)
+
+
+scaled_1 = scaler_1.fit_transform(values_1.reshape(-1,1))
+# frame as supervised learning
+reframed_1 = series_to_supervised(scaled_1, df.columns, 1, 1)
+
+print(reframed_1.head())
+
+values_2 = reframed_1.values
+print(values_2.shape)
+
+n_train_time = int(df.shape[0]*.7)
+n_val_time = int(df.shape[0]*.9)
+
+train_1 = values_2[:n_train_time, :]
+val_1 = values_2[n_train_time:n_val_time, :]
+test_1 = values_2[n_val_time:, :]
+print(train_1.shape, val_1.shape, test_1.shape) 
+
+##test = values[n_train_time:n_test_time, :]
+# split into input and outputs
+train_X_1, train_y_1 = train_1[:, :-1], train_1[:, -1]
+test_X_1, test_y_1 = test_1[:, :-1], test_1[:, -1]
+val_X_1, val_y_1 = val_1[:, :-1], val_1[:, -1]
+print(train_X_1.shape, train_y_1.shape, val_X_1.shape, val_y_1.shape,  test_X_1.shape, test_y_1.shape ) 
+
+# reshape input to be 3D [samples, timesteps, features]
+'''if more steps probably need to shift um die steps'''
+train_X_res_1 = train_X_1.reshape((train_X_1.shape[0], 1, train_X_1.shape[1]))
+test_X_res_1 = test_X_1.reshape((test_X_1.shape[0], 1, test_X_1.shape[1]))
+val_X_res_1 = val_X_1.reshape((val_X_1.shape[0], 1, val_X_1.shape[1]))
+print(train_X_res_1.shape, train_y_1.shape, val_X_res_1.shape, val_y_1.shape,  test_X_res_1.shape, test_y_1.shape ) 
+
+
+
+lstm_model_1 = cerate_lstm(layers_count = 1, batch_size_list=[100], dropout=.2)
+history = compile_and_fit(model = lstm_model_1, epochs = 40, X_train = train_X_res_1, 
+                y_train = train_y_1, X_val = val_X_res_1, y_val= val_y_1, verbose = 0)
+
+yhat_1 = lstm_model_1.predict(test_X_res_1)
+test_X_res_res_1 = test_X_res_1.reshape((test_X_res_1.shape[0], 1))
+print(yhat_1.shape, test_X_res_res_1.shape)
+
+# invert scaling for forecast
+inv_yhat_1 = np.concatenate((yhat_1, test_X_res_res_1[:, :]), axis=1)
+print(yhat_1.shape, inv_yhat_1.shape) # concated to -1 as the original
+
+inv_yhat_2 = scaler_1.inverse_transform(inv_yhat_1)
+print(inv_yhat_2.shape)
+
+inv_yhat_3 = inv_yhat_2[:,0]
+print(inv_yhat_3.shape)
+# invert scaling for actual
+test_y_res = test_y_1.reshape((len(test_y_1), 1))
+inv_y_1 = np.concatenate((test_y_res, test_X_res_res_1[:,:]), axis=1)
+print(test_y_res.shape, inv_y_1.shape)
+inv_y_2 = scaler.inverse_transform(inv_y_1)
+print(inv_y_2.shape)
+inv_y_3 = inv_y_2[:,0]
+print(inv_y_3.shape)
+# calculate RMSE
+rmse = np.sqrt(mean_squared_error(inv_y_3, inv_yhat_3))
+print('Test RMSE: %.3f' % rmse)
+
+
+
 

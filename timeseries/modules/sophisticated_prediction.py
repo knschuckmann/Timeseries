@@ -15,13 +15,13 @@ import matplotlib as mpl
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import seaborn as sns
+# import seaborn as sns
 import tensorflow as tf   
 from sklearn.preprocessing import MinMaxScaler, StandardScaler
 from sklearn.metrics import mean_squared_error
 
 
-from timeseries.modules.config import ORIG_DATA_PATH, SAVE_PLOTS_PATH, SAVE_MODELS_PATH, DATA, SAVE_RESULTS_PATH
+from timeseries.modules.config import ORIG_DATA_PATH, SAVE_PLOTS_PATH, SAVE_MODELS_PATH, DATA, SAVE_RESULTS_PATH, ORIGINAL_PATH
 from timeseries.modules.dummy_plots_for_theory import save_fig, set_working_directory
 from timeseries.modules.load_transform_data import load_transform_excel
 from timeseries.modules.baseline_prediction import combine_dataframe, monthly_aggregate, split
@@ -57,12 +57,30 @@ def scale_data_to_standrad(train, test, val):
     
 def train_val_test(data):
     length = len(data)
-    size_train = int(length*.7)
+    size_train = int(length*.8)
     size_test = int(length*.9)    
     # train, val, test
     return data[:size_train], data[size_train:size_test], data[size_test:]
     
+    
+def save_model_weights(model, path):
+    model.save_weights(path, save_format='tf')    
 
+
+def load_model_weights(batch_size, window, path):
+    
+    
+    model = LSTM_one(batch_size = batch_size, max_epoch_size = 40, window_class_mod = window)
+    model.load_weights(path)
+    model.compile(loss=tf.losses.MeanSquaredError(),
+                  optimizer=tf.optimizers.Adam(),
+                  metrics=[tf.metrics.MeanAbsoluteError()])
+    return model
+
+def set_index_in_df_list(dataframe):
+    for nr, data in enumerate(dataframe):
+        data_frame[nr] = data.set_index(data['Verkaufsdatum'], drop = True)
+    return dataframe
 
 class WindowGenerator():
     
@@ -161,7 +179,7 @@ class WindowGenerator():
             sequence_length=self.total_window_size,
             sequence_stride=1,
             shuffle=False,
-            batch_size=32,)
+            batch_size=16,) # here nachschauen 
       
         ds = ds.map(self.split_window)
       
@@ -232,9 +250,6 @@ class LSTM_Initial(tf.keras.Model):
     def who_am_i(self):
         return type(self).__name__
     
-    def build_graph(self):
-         x = tf.keras.Input(shape=(28,5))#,self.window_class_mod.example[0].shape[1:], ))
-         return tf.keras.Model(inputs=x, outputs=self.call(x))
 
 class LSTM_one(tf.keras.Model):
     
@@ -245,18 +260,39 @@ class LSTM_one(tf.keras.Model):
         self.batch_size = batch_size
         self.window_class_mod = window_class_mod
         
-        self.LSTM1 = tf.keras.layers.LSTM(batch_size,return_sequences=True)
-        self.LSTM2 = tf.keras.layers.LSTM(batch_size,return_sequences=False)
-        # self.Dense = tf.keras.layers.Dense(units=1)
+        self.LSTM1 = tf.keras.layers.LSTM(batch_size,return_sequences=True, activation='tanh',
+                                          recurrent_activation = 'tanh',
+                                          kernel_initializer= tf.initializers.random_normal(), 
+                                          bias_initializer=tf.initializers.random_uniform())
+        self.DP = tf.keras.layers.Dropout(.4)
+        self.LSTM2 = tf.keras.layers.LSTM(batch_size,return_sequences=True)
+        self.LSTM3 = tf.keras.layers.LSTM(batch_size,return_sequences=True)        
+        self.Dense1 = tf.keras.layers.Dense(units=1)
+        
+        self.Dense2 = tf.keras.layers.Dense(units=self.window_class_mod.label_width * len(self.window_class_mod.label_columns))
+        
         self.Dense = tf.keras.layers.Dense(units=self.window_class_mod.label_width * len(self.window_class_mod.label_columns),
-                                           kernel_initializer=tf.initializers.zeros)
+                                           kernel_initializer=tf.initializers.random_normal())
+        
+        self.Reshape = tf.keras.layers.Reshape([self.window_class_mod.label_width, len(self.window_class_mod.label_columns_indices)])
     
     def call(self, inputs):
         x = self.LSTM1(inputs)
+        x = self.DP(x)
         x = self.LSTM2(x)
+        x = self.DP(x)
+        x = self.LSTM3(x)
+        x = self.DP(x)
+        # x = self.LSTM4(x)
+        # x = self.DP(x)
+        # x = self.LSTM5(x)
+        # x = self.DP(x)
+        # x = self.LSTM6(x)
+        # x = self.DP(x)
+        # x = self.Dense(x)
         return self.Dense(x)
     
-    def train(self, patience=2):
+    def train(self, patience=5):
         early_stopping = tf.keras.callbacks.EarlyStopping(monitor='val_loss',
                                                       patience=patience,
                                                       mode='min')
@@ -266,11 +302,15 @@ class LSTM_one(tf.keras.Model):
         return self.fit(self.window_class_mod.train, epochs=self.max_epoch_size,
                         validation_data=self.window_class_mod.val,
                         callbacks=[early_stopping])
-         
+    
+    def who_am_i(self):
+        return type(self).__name__
+  
 #%%
 if __name__ == '__main__':
     set_working_directory()
     data_frame = load_transform_excel(ORIG_DATA_PATH)
+    events = pd.read_excel(ORIGINAL_PATH + 'events.xlsx')
     # data_orig = data_frame[0]#[['Einzel Menge in ST', 'Verkaufsdatum']]
     val_performance = {}
     performance = {}
@@ -281,11 +321,18 @@ if __name__ == '__main__':
         combined_m_df, combined_df = combine_dataframe(data_frame, monthly = True)
         monthly_list = list()
         for df in data_frame:
-            monthly_list .append(monthly_aggregate(df, combined = False))
+            monthly_list .append(monthly_aggregate(df, combined = True))
+        data_frame = set_index_in_df_list(data_frame)
         ran = True        
-        
+    
+
+    take_column = 'Einzel Menge in ST'
     # set the DataFrame to predict 
-    data_orig = combined_df
+    data_orig = pd.DataFrame(combined_df[take_column], columns = [take_column])
+    
+    # data_orig = data_orig.merge(events, left_on =data_orig.index, right_on='date')
+    # data_orig = data_orig.set_index(data_orig['date'], drop = True, verify_integrity= True)
+    # data_orig = data_orig.drop('date', axis = 1)
     
     used_columns = remove_unimportant_columns(data_orig.columns, ['Verkaufsdatum','Tages Wert in EUR','Einzel Wert in EUR','4Fahrt Wert in EUR', 'Gesamt Wert in EUR'])
     df = data_orig[used_columns]
@@ -303,16 +350,16 @@ if __name__ == '__main__':
 
     # initialize validation and performance parameters
    
-    # compare = pd.DataFrame(columns=['Modelname','input_width', 'label_width', 'shift', 'RMSE', 'batch_size','val_performance'])
-    input_w = pd.DataFrame([7,14,18,24], columns = ['input_width'])
-    label_w = pd.DataFrame([1,2,3,4,5,6,7,14,18,24], columns = ['label_width'])
-    shift = pd.DataFrame([1,2,3,4,5,6,7,14,18,24], columns = ['shift'])
-    batch_size = pd.DataFrame([4,8,16,32,64,128], columns = ['batch_size'])
+    compare = pd.DataFrame(columns=['Modelname','input_width', 'label_width', 'shift', 'RMSE', 'batch_size','val_performance'])
+    input_w = pd.DataFrame([24], columns = ['input_width'])
+    label_w = pd.DataFrame([1], columns = ['label_width'])
+    shift = pd.DataFrame([24], columns = ['shift'])
+    batch_size = pd.DataFrame([16], columns = ['batch_size'])
 
     for nr, width_inp in input_w.iterrows():
         for nr, width_label in label_w.iterrows():
-            if int(width_label['label_width']) >= int(width_inp['input_width']) + int(shi_ft['shift']):
-                continue
+            # if int(width_label['label_width']) >= int(width_inp['input_width']) + int(shi_ft['shift']):
+            #     continue
             for nr, shi_ft in shift.iterrows():
                 
                 for nr, batch in batch_size.iterrows():
@@ -322,11 +369,20 @@ if __name__ == '__main__':
                     # shift:= inputwidth + shift position to start predicting from backwards. 
                     w2 = WindowGenerator(input_width= int(width_inp['input_width']) , label_width=int(width_label['label_width']),
                                          shift=int(shi_ft['shift']), train_df = sc_train_df, val_df = sc_val_df, 
-                                         test_df = test_df, label_columns=['Einzel Menge in ST']) 
-                    lstm_model = LSTM_Initial(batch_size = int(batch['batch_size']), max_epoch_size = 40, window_class_mod = w2)
-                    # lstm_model = LSTM_one(batch_size = 32, max_epoch_size = 30, window_class_mod = w2)
+                                         test_df = sc_test_df, label_columns=['Einzel Menge in ST']) 
+                    # lstm_model = LSTM_Initial(batch_size = int(batch['batch_size']), max_epoch_size = 40, window_class_mod = w2)
+                    lstm_model = LSTM_one(batch_size = int(batch_size['batch_size']), max_epoch_size = 40, window_class_mod = w2)
                     name = lstm_model.who_am_i()
-                    histroy = lstm_model.train()
+                    early_stopping = tf.keras.callbacks.EarlyStopping(monitor='val_loss',
+                                                      patience=3,
+                                                      mode='min')
+                    lstm_model.compile(loss=tf.losses.MeanSquaredError(),
+                              optimizer=tf.optimizers.Adam(),
+                              metrics=[tf.metrics.MeanAbsoluteError()])
+                    lstm_model.fit(w2.train, epochs=40,
+                        validation_data=w2.val,
+                        callbacks=[early_stopping])
+                    # histroy = lstm_model.train()
             
                     # w2.plot(lstm_model)
                     val_performance[name] = lstm_model.evaluate(w2.val)
@@ -335,17 +391,189 @@ if __name__ == '__main__':
         
                     temp = pd.Series({'Modelname':name, 'input_width':int(width_inp['input_width']),
                                       'label_width':int(width_label['label_width']), 'shift':int(shi_ft['shift']),
-                                      'batch_size':int(batch['batch_size']),'RMSE':performance['RMSE'], 
+                                      'batch_size':int(batch['batch_size']),'RMSE':np.round(performance['RMSE'],2), 
                                       'val_performance':val_performance[name]})
                     compare = compare.append(temp, ignore_index = True)
-    compare.to_csv(SAVE_RESULTS_PATH + DATA + '_' +name +'.csv', sep=';')
     
+    compare.to_csv(SAVE_RESULTS_PATH + DATA + '_' + name +'.csv', sep=';', decimal='.')
+    save_model_weights(lstm_model, './model_results/LSTM_One/lstm')
+    
+    MSE = lstm_model.evaluate(w2.test, verbose=0)
+    RMSE = np.sqrt(MSE[0])
+    
+    print(RMSE)
+
 #%%
-   
     
+pred = lstm_model.predict(w2.test)    
+
+len(pred)
+plt.plot(pred[1])
+splited  = split(df[take_column], 24, .8)
+
+# lstm_model = LSTM_Initial(batch_size = int(batch['batch_size']), max_epoch_size = 40, window_class_mod = w2)
+lstm_model = LSTM_one(batch_size = int(batch_size['batch_size']), max_epoch_size = 40, window_class_mod = w2)
+name = lstm_model.who_am_i()
+early_stopping = tf.keras.callbacks.EarlyStopping(monitor='val_loss',
+                                  patience=patience,
+                                  mode='min')
+lstm_model.compile(loss=tf.losses.MeanSquaredError(),
+          optimizer=tf.optimizers.Adam(),
+          metrics=[tf.metrics.MeanAbsoluteError()])
+lstm_model.fit((splited['Train_X'], splited['Train_y']), epochs=40,callbacks=[early_stopping])
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+plt.plot(pred[:,0,:])
+trans = scaler.inverse_transform(pred)
+plt.plot(pred)
+lstm_model.summary()
+index, labels = [],[]
+for d in w2.test: 
+    index.append(d[0])
+    labels.append(d[1])
+
+
+len(labels)
+len(index)
+labels[2]
+
+
+MSE = lstm_model.evaluate(index[2],labels[2], batch_size = 1000)
+RMSE_2 = np.sqrt(MSE[0])
+y_hat= lstm_model.predict(index[2])
+
+
+(RMSE_2 + RMSE_1 + RMSE_0)/3
+
+    
+combined_df.columns
+take_column = '4Fahrt Menge in ST'
+# set the DataFrame to predict 
+data_orig = pd.DataFrame(combined_df[take_column], columns = [take_column])
+
+data_orig = data_orig.merge(events, left_on =data_orig.index, right_on='date')
+data_orig = data_orig.set_index(data_orig['date'], drop = True, verify_integrity= True)
+data_orig = data_orig.drop('date', axis = 1)
+
+used_columns = remove_unimportant_columns(data_orig.columns, ['Verkaufsdatum','Tages Wert in EUR','Einzel Wert in EUR','4Fahrt Wert in EUR', 'Gesamt Wert in EUR'])
+df = data_orig[used_columns]
+# num_features = df.shape[1]
+# column_indices = {name: i for i, name in enumerate(df.columns)}
+
+# Split data 
+train_df, val_df, test_df = train_val_test(df)
+
+# scale data
+scaler, sc_train, sc_test, sc_val = scale_data_to_standrad(train_df,test_df, val_df)
+sc_train_df = pd.DataFrame(sc_train, columns=train_df.columns, index = train_df.index)
+sc_test_df = pd.DataFrame(sc_test, columns=test_df.columns, index = test_df.index)
+sc_val_df = pd.DataFrame(sc_val, columns=val_df.columns, index = val_df.index)
+
+w3 = WindowGenerator(input_width= int(width_inp['input_width']) , label_width=int(width_label['label_width']),
+                                         shift=int(shi_ft['shift']), train_df = sc_train_df, val_df = sc_val_df, 
+                                         test_df = test_df, label_columns=[take_column]) 
+# model = load_model_weights(16,w3,'./model_results/LSTM_One/lstm')
+
+
+
+data = w3.test
+
+
+for dat in data:
+    print(dat)
+    
+pred = lstm_model.predict(data)
+
+pred1 = lstm_model(test_df)
+evalu = lstm_model.evaluate(data)
+RMSE = np.sqrt(evalu[0])
+
+sc_test_df[take_column]
+
+w3.split_window(sc_test_df[take_column])
+
+MSE = model.evaluate(w3.test, verbose=0)
+RMSE = np.sqrt(MSE[0])
+
+w3.split_window(pd.DataFrame(sc_test_df[take_column], columns = [take_column]))
+
+model.e
+inputs, labels = w3.example
+pred = model.predict(inp)
+
+pred = scaler.inverse_transform(pred)
+inp = scaler.inverse_transform(inputs)
+plt.plot(pred, legen)
+plt.plot(inp)
+
+
+MSE = model.evaluate(w3.test, verbose=0)
+RMSE = np.sqrt(MSE[0])
+
+
+data_orig = pd.DataFrame(data_frame[3]['Einzel Menge in ST'], columns = ['Einzel Menge in ST'])
+used_columns = remove_unimportant_columns(data_orig.columns, ['Verkaufsdatum','Tages Wert in EUR','Einzel Wert in EUR','4Fahrt Wert in EUR', 'Gesamt Wert in EUR'])
+df = data_orig[used_columns]
+
+# for column in ['Einzel Menge in ST', '4Fahrt Menge in ST', 'Tages Menge in ST','Gesamt Menge in ST', 'Gesamt Menge in ST calc']:
+#     if column not in df.columns:
+#         df[column] = pd.Series(np.zeros(df.shape[0]))
+
+
+# num_features = df.shape[1]
+# column_indices = {name: i for i, name in enumerate(df.columns)}
+
+# Split data 
+train_df, val_df, test_df = train_val_test(df)
+
+# scale data
+scaler, sc_train, sc_test, sc_val = scale_data_to_standrad(train_df,test_df, val_df)
+sc_train_df = pd.DataFrame(sc_train, columns=train_df.columns, index = train_df.index)
+sc_test_df = pd.DataFrame(sc_test, columns=test_df.columns, index = test_df.index)
+sc_val_df = pd.DataFrame(sc_val, columns=val_df.columns, index = val_df.index)
+
+w3 = WindowGenerator(input_width= int(width_inp['input_width']) , label_width=int(width_label['label_width']),
+                                         shift=int(shi_ft['shift']), train_df = sc_train_df, val_df = sc_val_df, 
+                                         test_df = test_df, label_columns=['Einzel Menge in ST']) 
+
+MSE = new_model.evaluate(w3.test, verbose=0)
+RMSE = np.sqrt(MSE[0])
+
+
+inputs, labels = w3.example
+
+inputs
+pred = lstm_model.predict(inputs)
+pred = model.predict(inputs)
+pred = scaler.inverse_transform(pred)
+
+pred.shape
+
+plt.plot(pred)
+plt.plot(labels[:,0,0])
+# w3.plot(lstm_model)
+print(RMSE)
+#%%
 res_1 = compare
 
-res_1.to_csv(SAVE_RESULTS_PATH + DATA + '_' +name +'_3.csv')
+res_1.to_csv(SAVE_RESULTS_PATH + DATA + '_' +name +'_4.csv')
 w2 = WindowGenerator(input_width=7, label_width=3, shift=1, train_df = sc_train_df, val_df = sc_val_df, 
                       test_df = test_df, label_columns=['Einzel Menge in ST']) 
 
@@ -461,9 +689,19 @@ w2.plot(baseline)
 
 #%%
 
-
+data = np.array(df, dtype=np.float32)
+ds = tf.keras.preprocessing.timeseries_dataset_from_array(
+    data=data,
+    targets=None,
+    sequence_length=w2.total_window_size,
+    sequence_stride=1,
+    shuffle=False,
+    batch_size=16,) # here nachschauen 
+  
+ds = ds.map(w2.split_window)
     
     
 
     
-    
+for d in ds:
+    print(d)
