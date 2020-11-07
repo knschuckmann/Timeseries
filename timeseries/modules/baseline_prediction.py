@@ -334,7 +334,20 @@ if __name__ == '__main__':
     # if best_model['Used Model'] == 'ARMA':
     #     best_model['Model'].plot_predict(train_size-30, train_size+20)
 
+# one_step = False
+# data_to_use = combined_df
+# used_column = combined_df.columns[1]
+# models = ['SARIMAX']
+# rolling_window = 7
+# diff_faktor = 7
 
-
-
+# result_list = list()
+# for model in models:
+#     temp, pred = compare_models(given_model = model , data = data_to_use[used_column], 
+#                             diff_faktor = diff_faktor, rolling_window = rolling_window, forecast_one_step = one_step)
+#     result_list.append(temp)
+#     pred_1 = pd.DataFrame(pred[0], index = data_to_use[used_column][-81:].index)
+#     plt.plot(pred_1, label = 'pred')
+#     plt.plot(data_to_use[used_column][-81:], label = 'orig')
+#     plt.legend(loc = 'best')
 

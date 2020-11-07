@@ -395,7 +395,7 @@ if __name__ == '__main__':
                                       'val_performance':val_performance[name]})
                     compare = compare.append(temp, ignore_index = True)
     
-    compare.to_csv(SAVE_RESULTS_PATH + DATA + '_' + name +'.csv', sep=';', decimal='.')
+    compare.to_csv(SAVE_RESULTS_PATH + DATA + '_' + name +'.csv', sep=';', decimal=',')
     save_model_weights(lstm_model, './model_results/LSTM_One/lstm')
     
     MSE = lstm_model.evaluate(w2.test, verbose=0)
