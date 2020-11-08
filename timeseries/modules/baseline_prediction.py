@@ -1,3 +1,4 @@
+
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
@@ -10,15 +11,18 @@ Created on Wed Oct 14 13:57:33 2020
 # A problem with ARIMA is that it does not support seasonal data. That is a time series with a repeating cycle.
 # ARIMA expects data that is either not seasonal or has the seasonal component removed, e.g. seasonally adjusted via methods such as seasonal differencing.
 
-from timeseries.modules.config import ORIG_DATA_PATH, SAVE_PLOTS_PATH, SAVE_MODELS_PATH, DATA
+from timeseries.modules.config import ORIG_DATA_PATH, SAVE_PLOTS_PATH, SAVE_MODELS_PATH, DATA, MODELS_PATH, SAVE_RESULTS_PATH
 from timeseries.modules.dummy_plots_for_theory import save_fig, set_working_directory
 from timeseries.modules.load_transform_data import load_transform_excel
+from timeseries.modules.sophisticated_prediction import create_dict_from_monthly
 import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
 from tqdm import tqdm
 import warnings
 import time
+import glob
+import os
 
 from statsmodels.tsa.stattools import adfuller # dickey fuller
 from statsmodels.tsa.seasonal import seasonal_decompose
@@ -297,57 +301,132 @@ def print_best_result(result_list):
         return result_list[temp_nr]
 
 
+def remove_unimportant_columns(all_columns, column_list):
+    
+    result_columns = set(all_columns)
+    for column in column_list:
+        try:
+            result_columns -= set([column])
+        except:
+            continue
+    return result_columns
+
+def predict_with_given_model(model, model_name, data, trained_column, used_column, data_name):
+
+    print('\n', model_name, ' Model started:')
+    if model_name in ['persistance','SARIMAX']:
+        splitted_data = split(data = data, diff_faktor= 0, rel_faktor = 0.9 )
+    elif model_name in ['ARIMA', 'ARMA']: 
+        diff_df = decomposition.observed.diff(diff_faktor)
+        diff_df.dropna(inplace=True)
+        splitted_data = split(data = diff_df, diff_faktor= 0, rel_faktor = 0.9 )
+    
+    result = {'Used Model':model_name, 'Trained column':trained_column, 
+              'RMSE':None, 'Predicted column':used_column, 'Pred DataFrame':data_name}  
+    
+    test_length = len(splitted_data['Test'])
+    splited_length = 1
+    
+    for i in tqdm(range(splited_length)):
+        # predict
+        warnings.filterwarnings('ignore')
+        yhat = model.predict(1,test_length)        
+        
+    obs = splitted_data['Test']
+    res = np.concatenate((yhat.reshape(-1,1),obs), axis = 1)
+    subresults = pd.DataFrame(res, columns = ['Predicted', 'Expected'])
+    
+    result['RMSE'] = np.round(mean_squared_error(obs, yhat, squared = False),2)
+    print('RMSE: %.3f' % result['RMSE'])
+    warnings.filterwarnings('default')
+
+    final_result = pd.DataFrame.from_dict(result, orient = 'index').T
+    
+    return final_result, subresults
+
 if __name__ == '__main__':
     
     set_working_directory()
-    data_frame = load_transform_excel(ORIG_DATA_PATH)
+    monthly_given_list = load_transform_excel(MONTH_DATA_PATH)
+    monthly_names_given_list = ['aut', 'eigVkSt', 'privat', 'app']
+    agg_monthly_names_list = ['einz_aut', 'einz_eigVkSt', 'einz_privat', 'einz_bus', 'einz_app',
+                              'tages_aut', 'tages_eigVkSt', 'tages_privat', 'tages_bus', 'tages_app']
+    try:
+        ran
+    except:
+        data_frame = load_transform_excel(ORIG_DATA_PATH)
+        combined_m_df, combined_df = combine_dataframe(data_frame, monthly = True)
+        monthly_list = list()
+        for df in data_frame:
+            monthly_list .append(monthly_aggregate(df, combined = True))
+        monthly_dict = create_dict_from_monthly(monthly_given_list, monthly_names_given_list, monthly_list, agg_monthly_names_list)    
+        ran = True 
     
-    combined_m_df, combined_df = combine_dataframe(data_frame, monthly = True)
-    
-    monthly_list = list()
-    for df in data_frame:
-        monthly_list .append(monthly_aggregate(df, combined = False))
-        
     one_step = False
-    data_to_use = data_frame[9]
-    used_column = combined_df.columns[3]
-    models = ['persistance', 'ARMA', 'ARIMA', 'SARIMAX']
+    predict_pretrained = True
+    data_list = data_frame[:]
+    data_list.append(combined_df)
+    data_names_list = ['df_0_einzel_aut', 'df_1_einzel_eigVkSt', 'df_2_einzel_privat',
+                       'df_3_einzel_bus', 'df_4_einzel_app', 'df_5_tages_aut', 
+                       'df_6_tages_eigVkSt', 'df_7_tages_privat', 'df_8_tages_bus', 
+                       'df_9_tages_app', 'combined_df']
+    
+    data_to_use = combined_df
+    used_column = combined_df.columns[1]
+    # models = ['persistance', 'ARMA', 'ARIMA', 'SARIMAX']
+    models = ['SARIMAX']
     rolling_window = 7
     diff_faktor = 7
+    Path_to_models = os.path.join(MODELS_PATH, 'more_steps/Einzel/', DATA , '')
     
-    result_list = list()
-    for model in models:
-        temp, pred = compare_models(given_model = model , data = data_to_use[used_column], 
-                                diff_faktor = diff_faktor, rolling_window = rolling_window, forecast_one_step = one_step)
-        result_list.append(temp)
-        if model != 'persistance':
-            temp['Model'].save(SAVE_MODELS_PATH + model + '_' + DATA +'.pkl')
     
-    best_model = print_best_result(result_list)  
-    result = pd.DataFrame(result_list)
-    result.loc[result.shape[0]] = best_model
-    result.to_csv(SAVE_MODELS_PATH + 'results.csv')
+    if not predict_pretrained:
+        result_list = list()
+        for model in models:
+            temp, pred = compare_models(given_model = model , data = data_to_use[used_column], 
+                                    diff_faktor = diff_faktor, rolling_window = rolling_window, forecast_one_step = one_step)
+            result_list.append(temp)
+            if model != 'persistance':
+                temp['Model'].save(SAVE_MODELS_PATH + model + '_' + DATA +'.pkl')
+        
+        best_model = print_best_result(result_list)  
+        result = pd.DataFrame(result_list)
+        result.loc[result.shape[0]] = best_model
+        result.to_csv(SAVE_MODELS_PATH + 'results.csv')
+        # train_size = int(data_to_use.shape[0]*0.9)
+        
+        # if best_model['Used Model'] == 'ARMA':
+        #     best_model['Model'].plot_predict(train_size-30, train_size+20)
+        
+    else:
+        final_res = pd.DataFrame(columns = ['Used Model', 'Trained column', 'RMSE', 'Predicted column', 'Pred DataFrame'])
+        for path in glob.glob(Path_to_models + '*.pkl'):
+            if os.path.basename(path).split('_')[0] in models:
+                used_path = path
+                model = models[0]
+            else:
+                print('No pkl file with given Model')
+        
+        if model in ['ARMA','ARIMA']:
+            model_loaded = ARIMAResults.load(used_path)
+        elif model == 'SARIMAX':
+            model_loaded = SARIMAXResults.load(used_path)
 
-
-    # train_size = int(data_to_use.shape[0]*0.9)
-    
-    # if best_model['Used Model'] == 'ARMA':
-    #     best_model['Model'].plot_predict(train_size-30, train_size+20)
-
-# one_step = False
-# data_to_use = combined_df
-# used_column = combined_df.columns[1]
-# models = ['SARIMAX']
-# rolling_window = 7
-# diff_faktor = 7
-
-# result_list = list()
-# for model in models:
-#     temp, pred = compare_models(given_model = model , data = data_to_use[used_column], 
-#                             diff_faktor = diff_faktor, rolling_window = rolling_window, forecast_one_step = one_step)
-#     result_list.append(temp)
-#     pred_1 = pd.DataFrame(pred[0], index = data_to_use[used_column][-81:].index)
-#     plt.plot(pred_1, label = 'pred')
-#     plt.plot(data_to_use[used_column][-81:], label = 'orig')
-#     plt.legend(loc = 'best')
-
+        for data_to_use, data_name in zip(data_list, data_names_list):
+            print(data_name)
+            used_columns = remove_unimportant_columns(data_to_use.columns, 
+                                                      ['Verkaufsdatum','Tages Wert in EUR','Einzel Wert in EUR','4Fahrt Wert in EUR', 'Gesamt Wert in EUR'])
+            data_to_use = data_to_use[used_columns] 
+            for used_column in data_to_use.columns:
+               
+                res, sub = predict_with_given_model(model_loaded, model, data_to_use[used_column], 
+                                                    used_path.split('/')[-3], used_column.split()[0], data_name)
+                
+                final_res = final_res.append(res)
+        final_res.to_csv(os.path.join(SAVE_RESULTS_PATH, 'combined_df_' + model +'_trained_'+ 
+                                      used_path.split('/')[-3] + '.csv'), 
+                                      sep = ';', decimal = ',',  index = False)
+        
+        plt.plot(sub[sub.columns[0]], label = sub.columns[0])
+        plt.plot(sub[sub.columns[1]], label = sub.columns[1])
+        plt.legend(loc='best')
