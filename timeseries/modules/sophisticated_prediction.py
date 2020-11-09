@@ -16,12 +16,13 @@ import pandas as pd
 import tensorflow as tf   
 from sklearn.preprocessing import MinMaxScaler, StandardScaler
 from sklearn.metrics import mean_squared_error
-
+from tqdm import tqdm
 
 from timeseries.modules.config import ORIG_DATA_PATH, SAVE_PLOTS_PATH, SAVE_MODELS_PATH, SAVE_RESULTS_PATH, ORIGINAL_PATH, MONTH_DATA_PATH
 from timeseries.modules.dummy_plots_for_theory import save_fig, set_working_directory
 from timeseries.modules.load_transform_data import load_transform_excel
 from timeseries.modules.baseline_prediction import combine_dataframe, monthly_aggregate
+
 
 def disable_gpu(disable_gpu):
     if disable_gpu:
@@ -129,7 +130,7 @@ def plot_losses(history):
     
 
 def create_dict_from_monthly(monthly_given_list, monthly_names_given_list, agg_monthly_list,
-                             agg_monthly_names_list):
+                             agg_monthly_names_list, combined = False):
 
     monthly_given_dict = {name:data for name, data in zip(monthly_names_given_list, monthly_given_list)}
     agg_monthly_dict = {name:data for name, data in zip(agg_monthly_names_list,agg_monthly_list)}
@@ -173,7 +174,26 @@ def create_dict_from_monthly(monthly_given_list, monthly_names_given_list, agg_m
         final_dict[monthly_name] = pd.concat([final_df, monthly_dict_copy[monthly_name].loc[ 
             pd.Period(max(final_df.index)+1):, : ]])
     
-    return final_dict
+    if combined:
+    
+        tages = list()
+        einzel = list()
+        fahrt_4 = list() 
+        gesamt = list()           
+        final = pd.DataFrame()
+        for key in final_dict.keys():
+            tages.append( final_dict[key][final_dict[key].columns[0]])
+            einzel.append( final_dict[key][final_dict[key].columns[1]])
+            fahrt_4.append( final_dict[key][final_dict[key].columns[2]])
+            gesamt.append( final_dict[key][final_dict[key].columns[3]])
+        
+        final['Tages'] = pd.DataFrame(tages).sum(axis = 0)
+        final['Einzel'] = pd.DataFrame(einzel).sum(axis = 0)
+        final['4Fahrt'] = pd.DataFrame(fahrt_4).sum(axis = 0)
+        final['Gesamt'] = pd.DataFrame(gesamt).sum(axis = 0)
+        
+        final_dict['combined'] = final   
+    return final_dict 
 
     
 def series_to_supervised(data_frame, n_in=1, n_out=1, dropnan=True):
@@ -213,15 +233,17 @@ if __name__ == '__main__':
     except:
         data_frame = load_transform_excel(ORIG_DATA_PATH)
         events = pd.read_excel(ORIGINAL_PATH + 'events.xlsx')
-        combined_m_df, combined_df = combine_dataframe(data_frame, monthly = True)
+        _ , combined_df = combine_dataframe(data_frame, monthly = True)
         monthly_list = list()
         for df in data_frame:
             monthly_list .append(monthly_aggregate(df, combined = True))
-        monthly_dict = create_dict_from_monthly(monthly_given_list, monthly_names_given_list, monthly_list, agg_monthly_names_list)    
-        
+        monthly_dict = create_dict_from_monthly(monthly_given_list, monthly_names_given_list, monthly_list, agg_monthly_names_list, True)    
+        monthly_events = monthly_aggregate(events, False)
         data_frame = set_index_in_df_list(data_frame)
         ran = True 
     
+
+
     used_timesteps_for_pred = 49
     prediction_steps = 1
     multivariate = True
@@ -233,13 +255,16 @@ if __name__ == '__main__':
     lstm_layers = len(lstm_batch_size_list)
     plot_loss_and_results = True
     train_model = True
+    monthly = True
     take_column = combined_df.columns[1]
-    data_list = data_frame[:]
-    data_list.append(combined_df)
-    data_names_list = ['df_0_einzel_aut', 'df_1_einzel_eigVkSt', 'df_2_einzel_privat',
-                       'df_3_einzel_bus', 'df_4_einzel_app', 'df_5_tages_aut', 
-                       'df_6_tages_eigVkSt', 'df_7_tages_privat', 'df_8_tages_bus', 
-                       'df_9_tages_app', 'combined_df']
+    # data_list = data_frame[:]
+    # data_list.append(combined_df)
+    # data_names_list = ['df_0_einzel_aut', 'df_1_einzel_eigVkSt', 'df_2_einzel_privat',
+    #                    'df_3_einzel_bus', 'df_4_einzel_app', 'df_5_tages_aut', 
+    #                    'df_6_tages_eigVkSt', 'df_7_tages_privat', 'df_8_tages_bus', 
+    #                    'df_9_tages_app', 'combined_df']
+    data_list = monthly_dict.values()
+    data_names_list = monthly_dict.keys()
     
     # data_list = data_list[0]
     # data_names_list = data_names_list[0]
@@ -256,12 +281,18 @@ if __name__ == '__main__':
         for take_column in used_columns:
             data_orig_df = pd.DataFrame(data_orig[take_column], columns = [take_column])
             if multivariate:
-                data_orig_df = data_orig_df.merge(events, left_on =data_orig_df.index, right_on='date')
-                data_orig_df = data_orig_df.set_index(data_orig_df['date'], drop = True, verify_integrity= True)
-                data_orig_df = data_orig_df.drop('date', axis = 1)            
+                if monthly:
+                    data_orig_df = data_orig_df.merge(monthly_events, left_index = True, right_index=True)
+                    data_orig_df.index.name = monthly_events.index.name
+                    # data_orig_df = data_orig_df.drop('date', axis = 1)            
+                else:
+                    data_orig_df = data_orig_df.merge(events, left_on =data_orig_df.index, right_on='date')
+                    data_orig_df = data_orig_df.set_index(data_orig_df['date'], drop = True, verify_integrity= True)
+                    data_orig_df = data_orig_df.drop('date', axis = 1)            
             df = data_orig_df[take_column] 
+
             df = check_if_column_right_place(column = take_column, dataframe = data_orig_df)     
-        
+
             # used_timesteps_for_pred_list = [49]
             # prediction_steps_list = [1]
             # batch_size_window_list = [16]
@@ -337,7 +368,7 @@ if __name__ == '__main__':
 
                 compare = compare.append(temp, ignore_index = True)
                                         
-    compare.to_csv(os.path.join(SAVE_RESULTS_PATH, 'LSTM_performance_results.csv'),
+    compare.to_csv(os.path.join(SAVE_RESULTS_PATH, 'LSTM_monthly_performance_results.csv'),
                    sep=';', decimal=',', index = False)
 
     

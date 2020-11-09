@@ -14,7 +14,7 @@ Created on Wed Oct 14 13:57:33 2020
 from timeseries.modules.config import ORIG_DATA_PATH, SAVE_PLOTS_PATH, SAVE_MODELS_PATH, DATA, MODELS_PATH, SAVE_RESULTS_PATH
 from timeseries.modules.dummy_plots_for_theory import save_fig, set_working_directory
 from timeseries.modules.load_transform_data import load_transform_excel
-from timeseries.modules.sophisticated_prediction import create_dict_from_monthly
+# from timeseries.modules.sophisticated_prediction import create_dict_from_monthly
 import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
@@ -235,14 +235,18 @@ def compare_models(given_model, data, diff_faktor, rolling_window, forecast_one_
 
 def monthly_aggregate(data_frame, combined):
     if not combined:
-        data_frame.index = data_frame['Verkaufsdatum']
-        data_frame = data_frame.loc[:,data_frame.columns != 'Verkaufsdatum']
-        
+        try:
+            data_frame.index = data_frame['Verkaufsdatum']
+            data_frame = data_frame.loc[:,data_frame.columns != 'Verkaufsdatum']
+        except:
+            data_frame.index = data_frame['date']
+            data_frame = data_frame.loc[:,data_frame.columns != 'date']
     result_df = pd.DataFrame(index = set(data_frame.index.to_period('M')), columns = data_frame.columns)
     
     for year_month in tqdm(set(result_df.index)):
         result_df.loc[year_month] = data_frame.loc[data_frame.index.to_period('M') == year_month].sum()
     
+    result_df.index.name = 'date'
     return result_df.sort_index()
 
 
