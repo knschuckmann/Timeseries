@@ -278,7 +278,7 @@ def scrape_save_events_gratis_in_berlin(df):
         
         number_free_events = number_free_events.append(df_temp, ignore_index=True)
         
-    number_free_events.to_csv(ORIGINAL_PATH + 'events1.csv', sep=';')
+    number_free_events.to_csv(ORIGINAL_PATH + 'events_monthly.csv', sep=';')
 
 
 def main(dayly_data = True, combine_tex = True, report_create = False):
@@ -332,5 +332,11 @@ def main(dayly_data = True, combine_tex = True, report_create = False):
     
 #%%  
 if __name__  == '__main__' : 
-    main(dayly_data = False)
+    # main(dayly_data = False)
+    start = dt.datetime(2012,1,1)
+    end = dt.datetime(2012,1,3)
+
+
+    time_df = pd.DataFrame(index = np.arange(start,end,step = dt.timedelta(days=1)))
+    scrape_save_events_gratis_in_berlin(time_df)
     
