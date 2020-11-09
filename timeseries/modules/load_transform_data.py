@@ -14,6 +14,7 @@ import matplotlib.pyplot as plt
 from bs4 import BeautifulSoup
 import requests
 import datetime
+import re
 from tqdm import tqdm
 from sklearn.preprocessing import MinMaxScaler, Normalizer, StandardScaler, RobustScaler, PowerTransformer 
 from timeseries.modules.dummy_plots_for_theory import save_fig, set_working_directory
@@ -280,7 +281,89 @@ def scrape_save_events_gratis_in_berlin(df):
         
     number_free_events.to_csv(ORIGINAL_PATH + 'events_monthly.csv', sep=';')
 
+def scrape_holidays_germany(df):
+    holidays = pd.DataFrame(columns = ['date', 'holidays'])
+    
+    for year in tqdm(set(df.to_period('Y').index)):
+        req = requests.get('https://www.ferienwiki.de/feiertage/' + str(year) + '/de')            
+        soup = BeautifulSoup(req.text, 'html.parser')
+        
+        table = soup.find("table", class_ = "table table-striped table-hover")
+        whitelist = ['td']
+        text_elements = [t for t in table.find_all(text=True) if t.parent.name in whitelist]
+        
+        for elem in text_elements:
+            # print(elem.split()[0])
+            try:
+                date = datetime. datetime. strptime(elem.split()[0], '%d.%m.%Y')
+                df_temp = {'date':date,'holidays': 1}
+                holidays = holidays.append(df_temp, ignore_index=True)
+            except:
+                pass
+    
+    holidays.to_csv(ORIGINAL_PATH + 'holidays.csv', sep=';')
+  
+def scrape_school_holidays(df): 
+    holidays = pd.DataFrame(columns = ['date', 'School holidays Berlin'])
+    
+    for year in tqdm(set(df.to_period('Y').index)):
+        # year = 2012
+        req = requests.get('https://www.schulferien.org/Kalender_mit_Ferien/kalender_'+ str(year) +'_ferien_Berlin.html')            
+        soup = BeautifulSoup(req.text, 'html.parser')
+        
+        tables = soup.find_all("div", class_= "tmv_box")
+        
+        for table in tables :
+            td_tables = table.find_all('td', {'data-tip-text':True})
+            for td in td_tables:
+                raw_string = td.get('data-tip-text')
+                data = re.split('<br>|<br />',raw_string)
+                for nr, dat in enumerate(data):
+                    if re.search('\d+.\d+.\d+',dat):
+                        data = data[nr]
+                        break
+                if len(data) < 12:
+                    date = datetime. datetime. strptime(data.strip(), '%d.%m.%Y')
+                    df_temp = {'date':date,'School holidays Berlin':1} 
+                    holidays = holidays.append(df_temp, ignore_index=True)
+                else:
 
+                    data = [dat.strip() for dat in data.split('-')]
+                    if len(data) > 1:
+                        from_to = True
+                    else:
+                        data = [dat.strip() for dat in data[0].split('+')]
+                        from_to = False
+                
+                    if from_to:
+                        try:
+                            # len(data[1])>10:    
+                            match = [re.findall('\d+.\d+.\d+', dat) for dat in data]
+                            if len(match[0]) >len(match[1]):    
+                                data = [match[0][1], match[1][0], match[0][0]]
+                                df_temp = {'date':data[2],'School holidays Berlin':1} 
+                                holidays = holidays.append(df_temp, ignore_index=True)
+                            elif len(match[1]) > len(match[0]):    
+                                data = [match[0][0], match[1][0], match[1][1]]
+                                df_temp = {'date':data[2],'School holidays Berlin':1} 
+                                holidays = holidays.append(df_temp, ignore_index=True)
+                        except:
+                            pass
+                    date_start = datetime. datetime. strptime(data[0], '%d.%m.%Y')
+                    date_end = datetime. datetime. strptime(data[1], '%d.%m.%Y')
+                    date =  np.arange(date_start, date_end, step = datetime.timedelta(days=1))
+                    for dat in date:
+                        df_temp = {'date':dat,'School holidays Berlin':1} 
+                        holidays = holidays.append(df_temp, ignore_index=True)
+                    else:
+                        for dat in data:
+                            df_temp = {'date':dat,'School holidays Berlin':1} 
+                            holidays = holidays.append(df_temp, ignore_index=True)
+    
+    holidays.to_csv(ORIGINAL_PATH + 'school_holidays.csv', sep=';')
+    
+    
+    
 def main(dayly_data = True, combine_tex = True, report_create = False):
     set_working_directory()
     
@@ -332,11 +415,17 @@ def main(dayly_data = True, combine_tex = True, report_create = False):
     
 #%%  
 if __name__  == '__main__' : 
-    # main(dayly_data = False)
-    start = dt.datetime(2012,1,1)
-    end = dt.datetime(2012,1,3)
-
-
-    time_df = pd.DataFrame(index = np.arange(start,end,step = dt.timedelta(days=1)))
-    scrape_save_events_gratis_in_berlin(time_df)
+    main(dayly_data = False)
+    # for scraping
+    # start = datetime.datetime(2012,1,1)
+    # end = datetime.datetime(2019,3,12)
+    # time_df = pd.DataFrame(index = np.arange(start,end,step = datetime.timedelta(days=1)))
+            
+    
+    
+    
+    
+    
+    
+    
     

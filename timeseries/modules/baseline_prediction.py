@@ -289,6 +289,73 @@ def combine_dataframe(data_frame_with_all_data, monthly= False, output_print = F
     
     return result_df    
 
+
+def create_dict_from_monthly(monthly_given_list, monthly_names_given_list, agg_monthly_list,
+                             agg_monthly_names_list, combined = False):
+
+    monthly_given_dict = {name:data for name, data in zip(monthly_names_given_list, monthly_given_list)}
+    agg_monthly_dict = {name:data for name, data in zip(agg_monthly_names_list,agg_monthly_list)}
+    
+    monthly_dict_copy = {}
+    for dic in tqdm(agg_monthly_dict):
+        for dic1 in agg_monthly_dict:
+            if dic != dic1 and dic.split('_')[1] == dic1.split('_')[1]:
+                used_columns = remove_unimportant_columns(agg_monthly_dict[dic].columns, ['Verkaufsdatum','Tages Wert in EUR','Einzel Wert in EUR','4Fahrt Wert in EUR', 'Gesamt Wert in EUR'])
+                used_columns1 = remove_unimportant_columns(agg_monthly_dict[dic1].columns, ['Verkaufsdatum','Tages Wert in EUR','Einzel Wert in EUR','4Fahrt Wert in EUR', 'Gesamt Wert in EUR'])
+                temp = agg_monthly_dict[dic][used_columns].merge(agg_monthly_dict[dic1][used_columns1], left_index = True, right_index = True)
+                temp['Gesamt Menge in ST'] = temp[['Gesamt Menge in ST_x','Gesamt Menge in ST_y']].sum(axis=1)
+                monthly_dict_copy[dic.split('_')[1]] = temp.drop(['Gesamt Menge in ST_x','Gesamt Menge in ST_y'], axis = 1)
+                
+                lis = list()
+                for nr,column in enumerate(monthly_dict_copy[dic.split('_')[1]].columns):
+                    lis.append(column.split()[0])
+                monthly_dict_copy[dic.split('_')[1]].columns = lis
+    
+    final_dict = {}
+    for monthly_name, monthly_data in tqdm(monthly_given_dict.items()):
+        einzel = monthly_data[(monthly_data['PGR'] == 200)]
+        fahrt4 = einzel[einzel[einzel.columns[1]].str.contains('4-Fahrten|4 Fahrten', regex=True)]
+        einzel = einzel[einzel[einzel.columns[1]].str.contains('4-Fahrten|4 Fahrten', regex=True) == False]
+        tages = monthly_data[(monthly_data['PGR'] == 300)]
+    
+        final_df = pd.DataFrame([tages.sum(axis=0, numeric_only = True)[2:], 
+                                 einzel.sum(axis=0, numeric_only = True)[2:],
+                                 fahrt4.sum(axis=0, numeric_only = True)[2:]], 
+                                index=['Tages', 'Einzel', '4Fahrt'])
+        final_df = final_df.T
+
+        las = list()
+        for year_month in final_df.index:
+            las.append(datetime.datetime.strptime(year_month, '%Y%m'))
+        
+        final_df.index = las
+        final_df.index = final_df.index.to_period('M')
+        final_df['Gesamt'] = final_df.sum(axis = 1)
+        
+        final_dict[monthly_name] = pd.concat([final_df, monthly_dict_copy[monthly_name].loc[ 
+            pd.Period(max(final_df.index)+1):, : ]])
+    
+    if combined:
+    
+        tages = list()
+        einzel = list()
+        fahrt_4 = list() 
+        gesamt = list()           
+        final = pd.DataFrame()
+        for key in final_dict.keys():
+            tages.append( final_dict[key][final_dict[key].columns[0]])
+            einzel.append( final_dict[key][final_dict[key].columns[1]])
+            fahrt_4.append( final_dict[key][final_dict[key].columns[2]])
+            gesamt.append( final_dict[key][final_dict[key].columns[3]])
+        
+        final['Tages'] = pd.DataFrame(tages).sum(axis = 0)
+        final['Einzel'] = pd.DataFrame(einzel).sum(axis = 0)
+        final['4Fahrt'] = pd.DataFrame(fahrt_4).sum(axis = 0)
+        final['Gesamt'] = pd.DataFrame(gesamt).sum(axis = 0)
+        
+        final_dict['combined'] = final   
+    return final_dict 
+
 def print_best_result(result_list):
     if type(result_list ) == dict:
         print('\nBest model {} with RMSE: {}'.format(result_list['Used Model'], result_list['RMSE'])) 

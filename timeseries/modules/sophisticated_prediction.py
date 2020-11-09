@@ -18,7 +18,7 @@ from sklearn.preprocessing import MinMaxScaler, StandardScaler
 from sklearn.metrics import mean_squared_error
 from tqdm import tqdm
 
-from timeseries.modules.config import ORIG_DATA_PATH, SAVE_PLOTS_PATH, SAVE_MODELS_PATH, SAVE_RESULTS_PATH, ORIGINAL_PATH, MONTH_DATA_PATH
+from timeseries.modules.config import ORIG_DATA_PATH, SAVE_PLOTS_PATH, SAVE_MODELS_PATH, SAVE_RESULTS_PATH, ORIGINAL_PATH, MONTH_DATA_PATH,MODELS_PATH
 from timeseries.modules.dummy_plots_for_theory import save_fig, set_working_directory
 from timeseries.modules.load_transform_data import load_transform_excel
 from timeseries.modules.baseline_prediction import combine_dataframe, monthly_aggregate
@@ -233,18 +233,20 @@ if __name__ == '__main__':
     except:
         data_frame = load_transform_excel(ORIG_DATA_PATH)
         events = pd.read_excel(ORIGINAL_PATH + 'events.xlsx')
+        events_monthly = pd.read_excel(ORIGINAL_PATH + 'events_monthly.xlsx')
         _ , combined_df = combine_dataframe(data_frame, monthly = True)
         monthly_list = list()
         for df in data_frame:
             monthly_list .append(monthly_aggregate(df, combined = True))
         monthly_dict = create_dict_from_monthly(monthly_given_list, monthly_names_given_list, monthly_list, agg_monthly_names_list, True)    
-        monthly_events = monthly_aggregate(events, False)
+        monthly_events = monthly_aggregate(events_monthly, False)
         data_frame = set_index_in_df_list(data_frame)
         ran = True 
     
 
 
-    used_timesteps_for_pred = 49
+    used_timesteps_for_pred = 4
+    # used_timesteps_for_pred = 49
     prediction_steps = 1
     multivariate = True
     batch_size_window = 16
@@ -289,7 +291,8 @@ if __name__ == '__main__':
                     data_orig_df = data_orig_df.merge(events, left_on =data_orig_df.index, right_on='date')
                     data_orig_df = data_orig_df.set_index(data_orig_df['date'], drop = True, verify_integrity= True)
                     data_orig_df = data_orig_df.drop('date', axis = 1)            
-            df = data_orig_df[take_column] 
+            
+            # df = data_orig_df[take_column] 
 
             df = check_if_column_right_place(column = take_column, dataframe = data_orig_df)     
 
@@ -324,7 +327,7 @@ if __name__ == '__main__':
                 lstm_model = cerate_lstm(layers_count = lstm_layers, batch_size_list= lstm_batch_size_list, dropout=.2, multisteps = prediction_steps)
                 history = compile_and_fit(lstm_model, epochs, data_window['Train'],
                                           data_window['Val'], patience, verbose = 0)
-                lstm_model.save(os.path.join(MODELS_PATH, 'LSTM',data_name))
+                lstm_model.save(os.path.join(MODELS_PATH, 'LSTM_monthly', data_name))
             else:
                 lstm_model = tf.keras.models.load_model(os.path.join(MODELS_PATH, 'LSTM','combined_df'))
             
