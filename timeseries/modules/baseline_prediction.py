@@ -11,7 +11,7 @@ Created on Wed Oct 14 13:57:33 2020
 # A problem with ARIMA is that it does not support seasonal data. That is a time series with a repeating cycle.
 # ARIMA expects data that is either not seasonal or has the seasonal component removed, e.g. seasonally adjusted via methods such as seasonal differencing.
 
-from timeseries.modules.config import ORIG_DATA_PATH, SAVE_PLOTS_PATH, SAVE_MODELS_PATH, DATA, MODELS_PATH, SAVE_RESULTS_PATH
+from timeseries.modules.config import ORIG_DATA_PATH, SAVE_PLOTS_PATH, SAVE_MODELS_PATH, DATA, MONTH_DATA_PATH, MODELS_PATH, SAVE_RESULTS_PATH
 from timeseries.modules.dummy_plots_for_theory import save_fig, set_working_directory
 from timeseries.modules.load_transform_data import load_transform_excel
 # from timeseries.modules.sophisticated_prediction import create_dict_from_monthly
@@ -23,6 +23,7 @@ import warnings
 import time
 import glob
 import os
+import datetime
 
 from statsmodels.tsa.stattools import adfuller # dickey fuller
 from statsmodels.tsa.seasonal import seasonal_decompose
@@ -434,40 +435,46 @@ if __name__ == '__main__':
         ran = True 
     
     one_step = False
-    predict_pretrained = True
-    data_list = data_frame[:]
-    data_list.append(combined_df)
-    data_names_list = ['df_0_einzel_aut', 'df_1_einzel_eigVkSt', 'df_2_einzel_privat',
-                       'df_3_einzel_bus', 'df_4_einzel_app', 'df_5_tages_aut', 
-                       'df_6_tages_eigVkSt', 'df_7_tages_privat', 'df_8_tages_bus', 
-                       'df_9_tages_app', 'combined_df']
+    predict_pretrained = False
+    data_list = monthly_dict.values()
+    data_names_list = monthly_dict.keys()
+    # data_list = data_frame[:]
+    # data_list.append(combined_df)
+    # data_names_list = ['df_0_einzel_aut', 'df_1_einzel_eigVkSt', 'df_2_einzel_privat',
+    #                    'df_3_einzel_bus', 'df_4_einzel_app', 'df_5_tages_aut', 
+    #                    'df_6_tages_eigVkSt', 'df_7_tages_privat', 'df_8_tages_bus', 
+    #                    'df_9_tages_app', 'combined_df']
     
-    data_to_use = combined_df
-    used_column = combined_df.columns[1]
-    # models = ['persistance', 'ARMA', 'ARIMA', 'SARIMAX']
-    models = ['SARIMAX']
+    data_to_use = monthly_dict['aut']
+    used_column = combined_df.columns[0]
+    models = ['persistance', 'ARMA', 'ARIMA', 'SARIMAX']
+    # models = ['SARIMAX']
     rolling_window = 7
     diff_faktor = 7
     Path_to_models = os.path.join(MODELS_PATH, 'more_steps/Einzel/', DATA , '')
     
-    
+    used_column = 'Einzel'
     if not predict_pretrained:
         result_list = list()
         for model in models:
             temp, pred = compare_models(given_model = model , data = data_to_use[used_column], 
                                     diff_faktor = diff_faktor, rolling_window = rolling_window, forecast_one_step = one_step)
+            temp['name'] = data_name
+            temp['used_column'] = used_column
             result_list.append(temp)
-            if model != 'persistance':
-                temp['Model'].save(SAVE_MODELS_PATH + model + '_' + DATA +'.pkl')
-        
+            # if model != 'persistance':
+            #     temp['Model'].save(SAVE_MODELS_PATH + model + '_' + DATA +'.pkl')
         best_model = print_best_result(result_list)  
+        
         result = pd.DataFrame(result_list)
         result.loc[result.shape[0]] = best_model
-        result.to_csv(SAVE_MODELS_PATH + 'results.csv')
-        # train_size = int(data_to_use.shape[0]*0.9)
+        result.to_csv(SAVE_MODELS_PATH + 'Baseline_results.csv')
+
         
-        # if best_model['Used Model'] == 'ARMA':
-        #     best_model['Model'].plot_predict(train_size-30, train_size+20)
+            # train_size = int(data_to_use.shape[0]*0.9)
+            
+            # if best_model['Used Model'] == 'ARMA':
+            #     best_model['Model'].plot_predict(train_size-30, train_size+20)
         
     else:
         final_res = pd.DataFrame(columns = ['Used Model', 'Trained column', 'RMSE', 'Predicted column', 'Pred DataFrame'])
