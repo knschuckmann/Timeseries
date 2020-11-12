@@ -16,7 +16,7 @@ import requests
 import datetime
 import re
 from tqdm import tqdm
-from sklearn.preprocessing import MinMaxScaler, Normalizer, StandardScaler, RobustScaler, PowerTransformer 
+from sklearn.preprocessing import Normalizer
 from timeseries.modules.dummy_plots_for_theory import save_fig, set_working_directory
 from timeseries.modules.config import ORIG_DATA_PATH, MONTH_DATA_PATH, ORIGINAL_PATH
 
@@ -279,20 +279,20 @@ def scrape_save_events_gratis_in_berlin(df):
         
         number_free_events = number_free_events.append(df_temp, ignore_index=True)
         
-    number_free_events.to_csv(ORIGINAL_PATH + 'events_monthly.csv', sep=';')
-
+    number_free_events.to_csv(ORIGINAL_PATH + 'events_monthly.csv', sep=';', index=False)
+  
 def scrape_holidays_germany(df):
     holidays = pd.DataFrame(columns = ['date', 'holidays'])
     
     for year in tqdm(set(df.to_period('Y').index)):
-        req = requests.get('https://www.ferienwiki.de/feiertage/' + str(year) + '/de')            
+        req = requests.get('https://www.ferienkalender.com/ferien_deutschland/Berlin/'+ str(year) +'-ferien-berlin.htm')
         soup = BeautifulSoup(req.text, 'html.parser')
         
-        table = soup.find("table", class_ = "table table-striped table-hover")
-        whitelist = ['td']
-        text_elements = [t for t in table.find_all(text=True) if t.parent.name in whitelist]
         
-        for elem in text_elements:
+        table = soup.find_all("div", class_ = "kasten")[1]
+        
+        for raw_date in soup.findAll('td', {'align': 'right'}):
+            elem = raw_date.get_text().split()[1]
             # print(elem.split()[0])
             try:
                 date = datetime. datetime. strptime(elem.split()[0], '%d.%m.%Y')
@@ -301,7 +301,7 @@ def scrape_holidays_germany(df):
             except:
                 pass
     
-    holidays.to_csv(ORIGINAL_PATH + 'holidays.csv', sep=';')
+    holidays.to_csv(ORIGINAL_PATH + 'holidays.csv', sep=';', index=False)
   
 def scrape_school_holidays(df): 
     holidays = pd.DataFrame(columns = ['date', 'School holidays Berlin'])
@@ -360,7 +360,7 @@ def scrape_school_holidays(df):
                             df_temp = {'date':dat,'School holidays Berlin':1} 
                             holidays = holidays.append(df_temp, ignore_index=True)
     
-    holidays.to_csv(ORIGINAL_PATH + 'school_holidays.csv', sep=';')
+    holidays.to_csv(ORIGINAL_PATH + 'school_holidays.csv', sep=';', index=False)
     
     
     
@@ -419,13 +419,9 @@ if __name__  == '__main__' :
     # for scraping
     # start = datetime.datetime(2012,1,1)
     # end = datetime.datetime(2019,3,12)
-    # time_df = pd.DataFrame(index = np.arange(start,end,step = datetime.timedelta(days=1)))
+    # df = pd.DataFrame(index = np.arange(start,end,step = datetime.timedelta(days=1)))
             
-    
-    
-    
-    
-    
+    # scrape_holidays_germany(df)
     
     
     
