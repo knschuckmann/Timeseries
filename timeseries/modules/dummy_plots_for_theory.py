@@ -53,7 +53,7 @@ def autocorr_fkt(x, ax=None):
     autocorr = np.correlate(x, x, mode='full') #cross correlation but convolving 
     autocorr = autocorr[x.size:]
     autocorr /= autocorr.max()
-    
+    # stem plot plots vertical lines 
     return ax.stem(autocorr)
 
 def temperature_data_preprocess_and_plot(data_path, save_path, save = False):
