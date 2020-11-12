@@ -22,7 +22,7 @@ from timeseries.modules.config import ORIG_DATA_PATH, SAVE_PLOTS_PATH, SAVE_MODE
 from timeseries.modules.dummy_plots_for_theory import save_fig, set_working_directory
 from timeseries.modules.load_transform_data import load_transform_excel
 from timeseries.modules.baseline_prediction import combine_dataframe, monthly_aggregate
-
+import warnings
 
 def disable_gpu(disable_gpu):
     if disable_gpu:
@@ -30,17 +30,17 @@ def disable_gpu(disable_gpu):
     else:
         os.environ["CUDA_VISIBLE_DEVICES"] = '0' # use GPU number 0 
 
-def cerate_lstm(layers_count=2, batch_size_list=[64, 64], dropout=0.2, multisteps = 1, **kwargs):
+def cerate_lstm(batch_size_list=[64, 64], dropout=0.2, multisteps = 1, **kwargs):
     
     model = tf.keras.Sequential()
     
     batch_size_list = [3]
     for number in range(len(batch_size_list) -1):
-        model.add(tf.keras.layers.LSTM(batch_size_list[number], return_sequences=True ,**kwargs))
+        model.add(tf.keras.layers.LSTM(batch_size_list[number], return_sequences=True, **kwargs))
         if dropout > 0:
             model.add(tf.keras.layers.Dropout(dropout))
     
-    model.add(tf.keras.layers.LSTM(batch_size_list[-1], return_sequences=False,**kwargs))
+    model.add(tf.keras.layers.LSTM(batch_size_list[-1], return_sequences=False, **kwargs))
     if dropout > 0:
         model.add(tf.keras.layers.Dropout(dropout))
     
@@ -174,6 +174,7 @@ def create_dict_from_monthly(monthly_given_list, monthly_names_given_list, agg_m
         final_dict[monthly_name] = pd.concat([final_df, monthly_dict_copy[monthly_name].loc[ 
             pd.Period(max(final_df.index)+1):, : ]])
     
+        final_dict[monthly_name].index.name = 'date'
     if combined:
     
         tages = list()
@@ -193,7 +194,9 @@ def create_dict_from_monthly(monthly_given_list, monthly_names_given_list, agg_m
         final['Gesamt'] = pd.DataFrame(gesamt).sum(axis = 0)
         
         final_dict['combined'] = final   
+        final_dict['combined'].index.name = 'date'
     return final_dict 
+
 
     
 def series_to_supervised(data_frame, n_in=1, n_out=1, dropnan=True):
@@ -220,7 +223,299 @@ def series_to_supervised(data_frame, n_in=1, n_out=1, dropnan=True):
         agg.dropna(inplace=True)
     return agg
  
+def create_multivariate_data(data_orig, take_column, events, monthly=False, multivariate=True):
+    # set the DataFrame to predict 
+    
+    data_orig_df = pd.DataFrame(data_orig[take_column], columns = [take_column])
+    if multivariate:
+        if monthly:
+            data_orig_df = data_orig_df.merge(events, left_index = True, right_index=True)
+            data_orig_df.index.name = events.index.name          
+        else:
+            data_orig_df = data_orig_df.merge(events, left_on =data_orig_df.index, right_on='date')
+            data_orig_df = data_orig_df.set_index(data_orig_df['date'], drop = True, verify_integrity= True)
+            data_orig_df = data_orig_df.drop('date', axis = 1)            
 
+    df = check_if_column_right_place(column = take_column, dataframe = data_orig_df) 
+    return df
+
+    
+def find_best_values(data_list, data_names_list, events, monthly, multivariate, 
+                              find_parameters, parameters,plot_loss_and_results= False):
+    multi = 'multiVar' if multivariate else 'uniVar'
+    
+    compare = pd.DataFrame(columns=['training_data','column_taken','used_timesteps_for_pred', 'prediction_steps', 'RMSE', 
+                                  'batch_size_window','lstm_batch_size_list', 'multivariate'])
+
+    # set the DataFrame to predict 
+    # better to give only two datasets in list because training is taking very long
+    for data_orig, data_name in zip(data_list, data_names_list):
+        print(data_name)
+        used_columns = remove_unimportant_columns(data_orig.columns, ['Verkaufsdatum',
+                                                                      'Tages Wert in EUR',
+                                                                      'Einzel Wert in EUR',
+                                                                      '4Fahrt Wert in EUR', 
+                                                                      'Gesamt Wert in EUR'])
+        for column in used_columns:
+            if 'Einzel' in column:
+                take_column = column
+        # print('dataframe: ',data_name, '\ncolumn: ',take_column)
+        data_orig_df = pd.DataFrame(data_orig[take_column], columns = [take_column])
+
+        df = create_multivariate_data(data_orig_df, take_column, events, monthly=monthly, 
+                                      multivariate=multivariate)
+        
+        for used_timesteps_for_pred in find_parameters['used_timesteps_for_pred_list']:
+            for batch_size_window in find_parameters['batch_size_window_list']:
+                for lstm_batch_size_list in find_parameters['lstm_batch_size_list_list']:
+                    
+                    reframed = series_to_supervised(df, n_in = used_timesteps_for_pred, 
+                                                    n_out = parameters['prediction_steps'])
+                    
+                    # Split data 
+                    train_df, val_df, test_df = train_val_test_split(reframed, rel_train = .7, 
+                                                                     rel_val = .9)
+                    
+                    # scale data
+                    scaler, sc_train, sc_test, sc_val = scale_data_to_scaler(parameters['scale_method'], 
+                                                                             train_df, test_df, 
+                                                                             val_df)
+                    
+                    # split into input and outputs
+                    train_X, train_y, val_X, val_y, test_X, test_y  = split_into_in_out(train = sc_train, val = sc_val, 
+                                                                                        test = sc_test, 
+                                                                                        prediction_steps = parameters['prediction_steps'])
+                    # print(train_X.shape, train_y.shape, val_X.shape, val_y.shape,  test_X.shape, test_y.shape)
+                    
+                    # create Window 
+                    data_window = {'Train':None, 'Val':None, 'Test':None}
+                    for key, X, y in zip(data_window.keys(), [train_X, val_X, test_X],[train_y, val_y, test_y]):
+                        data_window [key] = create_timeseries_data_batches(X= X, y= y, 
+                                                                           prediction_steps= parameters['prediction_steps'], 
+                                                                           batch_size = batch_size_window)
+                    # Train model 
+                    lstm_model = cerate_lstm(batch_size_list= lstm_batch_size_list, 
+                                             dropout=.2, 
+                                             multisteps = parameters['prediction_steps'])
+                    history = compile_and_fit(lstm_model, parameters['epochs'], data_window['Train'],
+                                              data_window['Val'], parameters['patience'], verbose = 0)
+                    # lstm_model.save(os.path.join(MODELS_PATH, 'LSTM_monthly', data_name))                                        
+                    if plot_loss_and_results: plot_losses(history)
+        
+                    # Predict
+                    yhat = lstm_model.predict(data_window['Test'])
+        
+                    if parameters['prediction_steps'] >= 2:
+                        test_X = test_X[:-(parameters['prediction_steps']-1)]
+                        test_y = test_y[:-(parameters['prediction_steps']-1)]
+                    
+                    inv_yhat = np.concatenate((test_X, yhat), axis=1)
+                    inv_yhat = scaler.inverse_transform(inv_yhat)
+                    inv_yhat = inv_yhat[:,-parameters['prediction_steps']:]
+                    
+                    inv_y = np.concatenate((test_X, test_y), axis=1)
+                    inv_y = scaler.inverse_transform(inv_y)
+                    inv_y = inv_y[:,-parameters['prediction_steps']:]
+                    
+                    # Plot predictions
+                    for i in range(parameters['prediction_steps']):
+                        rmse = mean_squared_error(inv_y[:,i], inv_yhat[:,i], squared = False)
+                        title = 'Plot of prediction for timestep (t)' if i == 0 else 'Plot of prediction for timestep (t+%d)' %(i)
+                        if plot_loss_and_results:
+                            plt.title(title)
+                            plt.plot(inv_y[:,i], label = 'orig')
+                            plt.plot(inv_yhat[:,i], label = 'pred')
+                            plt.legend(loc = 'best')
+                            plt.show()
+                        print('Test RMSE: %.3f\n' % rmse)
+        
+                    temp = pd.Series({'training_data':data_name, 'column_taken':take_column, 
+                                      'used_timesteps_for_pred':int(used_timesteps_for_pred),
+                                      'prediction_steps':parameters['prediction_steps'], 
+                                      'RMSE':np.round(rmse,2),
+                                      'multivariate': str(multivariate),
+                                      'batch_size_window':int(batch_size_window), 
+                                      'lstm_batch_size_list':lstm_batch_size_list})
+    
+                    compare = compare.append(temp, ignore_index = True)
+                                        
+    compare.to_csv(os.path.join(SAVE_RESULTS_PATH, parameters['lstm_path']+'_find_params_'+
+                                multi+'.csv'),
+                   sep=';', decimal=',', index = False)
+
+def create_pred_for_all_columns(data_list, data_names_list, 
+                                            monthly, multivariate, events, 
+                                            parameters, plot_loss_and_results= False):
+    
+    multi = 'multiVar' if multivariate else 'uniVar'
+    compare = pd.DataFrame(columns=['training_data','column_taken','used_timesteps_for_pred', 'prediction_steps',
+                                    'RMSE', 'batch_size_window','lstm_batch_size_list', 'multivariate'])
+    # set the DataFrame to predict 
+    data_orig,data_name = data_list[3], data_names_list[3]
+    for data_orig, data_name in zip(data_list, data_names_list):
+        used_columns = remove_unimportant_columns(data_orig.columns, ['Verkaufsdatum',
+                                                                      'Tages Wert in EUR',
+                                                                      'Einzel Wert in EUR',
+                                                                      '4Fahrt Wert in EUR', 
+                                                                      'Gesamt Wert in EUR'])
+        for take_column in used_columns:
+            print('dataframe: ',data_name, '\ncolumn: ',take_column)
+            data_orig_df = pd.DataFrame(data_orig[take_column], columns = [take_column])
+
+            df = create_multivariate_data(data_orig_df, take_column, events, monthly=monthly, 
+                                          multivariate=multivariate)
+                            
+            reframed = series_to_supervised(df, n_in = parameters['used_timesteps_for_pred'], 
+                                                                  n_out = parameters['prediction_steps'])
+            
+            # Split data 
+            train_df, val_df, test_df = train_val_test_split(reframed, rel_train = .7, rel_val = .9)
+            
+            # scale data
+            scaler, sc_train, sc_test, sc_val = scale_data_to_scaler(parameters['scale_method'], train_df, 
+                                                                     test_df, val_df)
+            
+            # split into input and outputs
+            train_X, train_y, val_X, val_y, test_X, test_y  = split_into_in_out(train = sc_train, val = sc_val, 
+                                                                                test = sc_test, 
+                                                                                prediction_steps = parameters['prediction_steps'])
+            # print(train_X.shape, train_y.shape, val_X.shape, val_y.shape,  test_X.shape, test_y.shape)
+            
+            # create Window 
+            data_window = {'Train':None, 'Val':None, 'Test':None}
+            for key, X, y in zip(data_window.keys(), [train_X, val_X, test_X],[train_y, val_y, test_y]):
+                data_window [key] = create_timeseries_data_batches(X= X, y= y, 
+                                                                   prediction_steps= parameters['prediction_steps'], 
+                                                                   batch_size = parameters['batch_size_window'])
+            
+            # Train model 
+            lstm_model = cerate_lstm( batch_size_list= parameters['lstm_batch_size_list'], 
+                                     dropout=.2, multisteps = parameters['prediction_steps'])
+            history = compile_and_fit(lstm_model, parameters['epochs'], data_window['Train'],
+                                      data_window['Val'], parameters['patience'], verbose = 0)
+            
+            lstm_model.save(os.path.join(MODELS_PATH, parameters['lstm_path'], multi, data_name, take_column))
+            
+            
+            if plot_loss_and_results: plot_losses(history)
+           
+            # Predict
+            yhat = lstm_model.predict(data_window['Test'])
+            if prediction_steps >= 2:
+                test_X = test_X[:-(parameters['prediction_steps']-1)]
+                test_y = test_y[:-(parameters['prediction_steps']-1)]
+            
+            inv_yhat = np.concatenate((test_X, yhat), axis=1)
+            inv_yhat = scaler.inverse_transform(inv_yhat)
+            inv_yhat = inv_yhat[:,-parameters['prediction_steps']:]
+            
+            inv_y = np.concatenate((test_X, test_y), axis=1)
+            inv_y = scaler.inverse_transform(inv_y)
+            inv_y = inv_y[:,-parameters['prediction_steps']:]
+            
+            # Plot predictions
+            for i in range(parameters['prediction_steps']):
+                rmse = mean_squared_error(inv_y[:,i], inv_yhat[:,i], squared = False)
+                title = 'Plot of prediction for timestep (t)' if i == 0 else 'Plot of prediction for timestep (t+%d)' %(i)
+                if plot_loss_and_results:
+                    plt.title(title)
+                    plt.plot(inv_y[:,i], label = 'orig')
+                    plt.plot(inv_yhat[:,i], label = 'pred')
+                    plt.legend(loc = 'best')
+                    plt.show()
+                print('Test RMSE: %.3f\n' % rmse)
+                
+                temp = pd.Series({'training_data':data_name, 'column_taken':take_column, 
+                                  'used_timesteps_for_pred':parameters['used_timesteps_for_pred'],
+                                  'prediction_steps':parameters['prediction_steps'], 
+                                  'RMSE':np.round(rmse,2),
+                                  'multivariate': str(multivariate),
+                                  'batch_size_window':parameters['batch_size_window'], 
+                                  'lstm_batch_size_list':parameters['lstm_batch_size_list']})
+
+                compare = compare.append(temp, ignore_index = True)
+    
+    compare.to_csv(os.path.join(SAVE_RESULTS_PATH, parameters['lstm_path'] + '_performance_results_' + multi + '.csv'),
+                   sep=';', decimal=',', index = False)
+
+
+def create_pred_with_trained_model(path_to_model, data_list, data_names_list, 
+                                            monthly, multivariate, name_trained_df, 
+                                            name_trained_column, events, parameters, plot_loss_and_results= False):
+    
+    multi = 'multiVar' if multivariate else 'uniVar'
+    compare = pd.DataFrame(columns=['Used Model','trained_df','Trained column', 'RMSE', 
+                                    'Predicted column','Pred DataFrame'])  
+    # set the DataFrame to predict 
+    for data_orig, data_name in zip(data_list, data_names_list):
+        used_columns = remove_unimportant_columns(data_orig.columns, ['Verkaufsdatum',
+                                                                      'Tages Wert in EUR',
+                                                                      'Einzel Wert in EUR',
+                                                                      '4Fahrt Wert in EUR', 
+                                                                      'Gesamt Wert in EUR'])
+        for take_column in used_columns:
+            print('dataframe: ',data_name, '\ncolumn: ',take_column)
+            data_orig_df = pd.DataFrame(data_orig[take_column], columns = [take_column])
+
+            df = create_multivariate_data(data_orig_df, take_column, events, monthly=monthly, multivariate=multivariate)
+                            
+            reframed = series_to_supervised(df, n_in = parameters['used_timesteps_for_pred'], n_out = parameters['prediction_steps'])
+            
+            # Split data 
+            train_df, val_df, test_df = train_val_test_split(reframed, rel_train = .7, rel_val = .9)
+            # scale data
+            scaler, sc_train, sc_test, sc_val = scale_data_to_scaler(parameters['scale_method'], train_df, test_df, val_df)            
+            # split into input and outputs
+            train_X, train_y, val_X, val_y, test_X, test_y  = split_into_in_out(train = sc_train, val = sc_val, test = sc_test, prediction_steps = parameters['prediction_steps'])
+            # print(train_X.shape, train_y.shape, val_X.shape, val_y.shape,  test_X.shape, test_y.shape)
+            
+            # create Window 
+            data_window = {'Train':None, 'Val':None, 'Test':None}
+            for key, X, y in zip(data_window.keys(), [train_X, val_X, test_X],[train_y, val_y, test_y]):
+                data_window [key] = create_timeseries_data_batches(X= X, y= y, 
+                                                                   prediction_steps= parameters['prediction_steps'], batch_size = parameters['batch_size_window'])
+            
+            # Load model
+            lstm_model = tf.keras.models.load_model(path_to_model)
+        
+            # Predict
+            yhat = lstm_model.predict(data_window['Test'])
+            
+            if parameters['prediction_steps'] >= 2:
+                test_X = test_X[:-(parameters['prediction_steps']-1)]
+                test_y = test_y[:-(parameters['prediction_steps']-1)]
+            
+            inv_yhat = np.concatenate((test_X, yhat), axis=1)
+            inv_yhat = scaler.inverse_transform(inv_yhat)
+            inv_yhat = inv_yhat[:,-parameters['prediction_steps']:]
+            
+            inv_y = np.concatenate((test_X, test_y), axis=1)
+            inv_y = scaler.inverse_transform(inv_y)
+            inv_y = inv_y[:,-parameters['prediction_steps']:]
+            
+            # Plot predictions
+            for i in range(parameters['prediction_steps']):
+                rmse = mean_squared_error(inv_y[:,i], inv_yhat[:,i], squared = False)
+                title = 'Plot of prediction for timestep (t)' if i == 0 else 'Plot of prediction for timestep (t+%d)' %(i)
+                if plot_loss_and_results:
+                    plt.title(title)
+                    plt.plot(inv_y[:,i], label = 'orig')
+                    plt.plot(inv_yhat[:,i], label = 'pred')
+                    plt.legend(loc = 'best')
+                    plt.show()
+                print('Test RMSE: %.3f\n' % rmse)
+                
+                temp = pd.Series({'Used Model':'LSTM','trained_df':name_trained_df,
+                                  'Trained column':name_trained_column, 'RMSE':np.round(rmse,2), 
+                                  'Predicted column':take_column ,'Pred DataFrame':data_name})
+                
+                compare = compare.append(temp, ignore_index = True)
+    
+                                          
+    compare.to_csv(os.path.join(SAVE_RESULTS_PATH, 'compare_'+name_trained_df+'_'+ parameters['lstm_path']+
+                                '_trained_'+name_trained_column+'_'+multi + '.csv'), sep=';', decimal=',', index = False)
+   
+#%%
 if __name__ == '__main__':
     # initialize
     set_working_directory()
@@ -244,134 +539,72 @@ if __name__ == '__main__':
         ran = True 
     
 
-
-    used_timesteps_for_pred = 4
-    # used_timesteps_for_pred = 49
+    warnings.filterwarnings('ignore')
+    used_timesteps_for_pred = 49
     prediction_steps = 1
-    multivariate = True
+    multivariate = False
     batch_size_window = 16
     epochs = 40
     patience = 3 # for early stoping
     lstm_batch_size_list = [50,50,50,50]
     scale_method = MinMaxScaler()
-    lstm_layers = len(lstm_batch_size_list)
-    plot_loss_and_results = True
-    train_model = True
+    plot_loss_and_results = False
     monthly = True
-    take_column = combined_df.columns[1]
-    # data_list = data_frame[:]
-    # data_list.append(combined_df)
-    # data_names_list = ['df_0_einzel_aut', 'df_1_einzel_eigVkSt', 'df_2_einzel_privat',
-    #                    'df_3_einzel_bus', 'df_4_einzel_app', 'df_5_tages_aut', 
-    #                    'df_6_tages_eigVkSt', 'df_7_tages_privat', 'df_8_tages_bus', 
-    #                    'df_9_tages_app', 'combined_df']
-    data_list = monthly_dict.values()
-    data_names_list = monthly_dict.keys()
+    event_df = events 
+    multi = 'multiVar' if multivariate else 'uniVar'
+    action = 'predict'       # 'find', 'train', 'predict'
     
-    # data_list = data_list[0]
-    # data_names_list = data_names_list[0]
-    # compare = pd.DataFrame(columns=['column_taken','used_timesteps_for_pred', 'prediction_steps', 'RMSE', 
-    #                                 'batch_size_window','lstm_batch_size_list', 'multivariate'])
-    compare = pd.DataFrame(columns=['training_data','column_taken','used_timesteps_for_pred', 'prediction_steps', 'RMSE', 
-                                  'batch_size_window','lstm_batch_size_list', 'multivariate'])
-    # compare = pd.DataFrame(columns=['Used Model','trained_df','Trained column', 'RMSE', 
-    #                                 'Predicted column','Pred DataFrame'])        
-    # set the DataFrame to predict 
-    for data_orig, data_name in zip(data_list, data_names_list):
-        print(data_name)
-        used_columns = remove_unimportant_columns(data_orig.columns, ['Verkaufsdatum','Tages Wert in EUR','Einzel Wert in EUR','4Fahrt Wert in EUR', 'Gesamt Wert in EUR'])
-        for take_column in used_columns:
-            data_orig_df = pd.DataFrame(data_orig[take_column], columns = [take_column])
-            if multivariate:
-                if monthly:
-                    data_orig_df = data_orig_df.merge(monthly_events, left_index = True, right_index=True)
-                    data_orig_df.index.name = monthly_events.index.name
-                    # data_orig_df = data_orig_df.drop('date', axis = 1)            
-                else:
-                    data_orig_df = data_orig_df.merge(events, left_on =data_orig_df.index, right_on='date')
-                    data_orig_df = data_orig_df.set_index(data_orig_df['date'], drop = True, verify_integrity= True)
-                    data_orig_df = data_orig_df.drop('date', axis = 1)            
-            
-            # df = data_orig_df[take_column] 
-
-            df = check_if_column_right_place(column = take_column, dataframe = data_orig_df)     
-
-            # used_timesteps_for_pred_list = [49]
-            # prediction_steps_list = [1]
-            # batch_size_window_list = [16]
-            # lstm_batch_size_list_list = [[50,50,50,50]]
-            # for used_timesteps_for_pred in used_timesteps_for_pred_list:
-            #     for prediction_steps in prediction_steps_list:
-            #         for batch_size_window in batch_size_window_list:
-            #             for lstm_batch_size_list in lstm_batch_size_list_list:
-                            
-            reframed = series_to_supervised(df, n_in = used_timesteps_for_pred, n_out = prediction_steps)
-            
-            # Split data 
-            train_df, val_df, test_df = train_val_test_split(reframed, rel_train = .7, rel_val = .9)
-            
-            # scale data
-            scaler, sc_train, sc_test, sc_val = scale_data_to_scaler(scale_method, train_df, test_df, val_df)
-            
-            # split into input and outputs
-            train_X, train_y, val_X, val_y, test_X, test_y  = split_into_in_out(train = sc_train, val = sc_val, test = sc_test, prediction_steps = prediction_steps)
-            # print(train_X.shape, train_y.shape, val_X.shape, val_y.shape,  test_X.shape, test_y.shape)
-            
-            # create Window 
-            data_window = {'Train':None, 'Val':None, 'Test':None}
-            for key, X, y in zip(data_window.keys(), [train_X, val_X, test_X],[train_y, val_y, test_y]):
-                data_window [key] = create_timeseries_data_batches(X= X, y= y, 
-                                                                   prediction_steps= prediction_steps, batch_size = batch_size_window)
-            if train_model:
-                # Train model 
-                lstm_model = cerate_lstm(layers_count = lstm_layers, batch_size_list= lstm_batch_size_list, dropout=.2, multisteps = prediction_steps)
-                history = compile_and_fit(lstm_model, epochs, data_window['Train'],
-                                          data_window['Val'], patience, verbose = 0)
-                lstm_model.save(os.path.join(MODELS_PATH, 'LSTM_monthly', data_name))
-            else:
-                lstm_model = tf.keras.models.load_model(os.path.join(MODELS_PATH, 'LSTM','combined_df'))
-            
-            
-            if plot_loss_and_results: plot_losses(history)
-            # Predict
-            yhat = lstm_model.predict(data_window['Test'])
-            if prediction_steps >= 2:
-                test_X = test_X[:-(prediction_steps-1)]
-                test_y = test_y[:-(prediction_steps-1)]
-            
-            inv_yhat = np.concatenate((test_X, yhat), axis=1)
-            inv_yhat = scaler.inverse_transform(inv_yhat)
-            inv_yhat = inv_yhat[:,-prediction_steps:]
-            
-            inv_y = np.concatenate((test_X, test_y), axis=1)
-            inv_y = scaler.inverse_transform(inv_y)
-            inv_y = inv_y[:,-prediction_steps:]
-            
-            # Plot predictions
-            for i in range(prediction_steps):
-                rmse = mean_squared_error(inv_y[:,i], inv_yhat[:,i], squared = False)
-                title = 'Plot of prediction for timestep (t)' if i == 0 else 'Plot of prediction for timestep (t+%d)' %(i)
-                if plot_loss_and_results:
-                    plt.title(title)
-                    plt.plot(inv_y[:,i], label = 'orig')
-                    plt.plot(inv_yhat[:,i], label = 'pred')
-                    plt.legend(loc = 'best')
-                    plt.show()
-                print('Test RMSE: %.3f' % rmse)
-                
-                # temp = pd.Series({'Used Model':'LSTM','trained_df':'combined_df',
-                #                   'Trained column':'Einzel', 'RMSE':rmse, 
-                #                   'Predicted column':take_column ,'Pred DataFrame':data_name})
-                
-                temp = pd.Series({'training_data':data_name, 'column_taken':take_column, 'used_timesteps_for_pred':int(used_timesteps_for_pred),
-                          'prediction_steps':int(prediction_steps), 'RMSE':np.round(rmse,2),
-                          'multivariate': str(multivariate),
-                          'batch_size_window':int(batch_size_window), 
-                          'lstm_batch_size_list':lstm_batch_size_list})
-
-                compare = compare.append(temp, ignore_index = True)
-                                        
-    compare.to_csv(os.path.join(SAVE_RESULTS_PATH, 'LSTM_monthly_performance_results.csv'),
-                   sep=';', decimal=',', index = False)
-
+    if monthly:
+        lstm_path = 'LSTM_monthly'
+        data_list = list(monthly_dict.values())
+        data_names_list = list(monthly_dict.keys())
+        used_timesteps_for_pred = 4
+        used_timesteps_for_pred_list = [4, 7, 10, 30]
+        event_df = monthly_events
+        batch_size_window = 128
+        
+        if not multivariate:
+            batch_size_window = 4
+            lstm_batch_size_list = [20,20]
+            column = 'Einzel'
+    else:
+        lstm_path = 'LSTM'
+        data_list = data_frame[:]
+        data_list.append(combined_df)
+        data_names_list = ['df_0_einzel_aut', 'df_1_einzel_eigVkSt', 'df_2_einzel_privat',
+                           'df_3_einzel_bus', 'df_4_einzel_app', 'df_5_tages_aut', 
+                           'df_6_tages_eigVkSt', 'df_7_tages_privat', 'df_8_tages_bus', 
+                           'df_9_tages_app', 'combined_df']
+        column = 'Einzel Menge in ST'
+        used_timesteps_for_pred_list = [7, 10, 30, 49, 50]
+    find_parameters = {'used_timesteps_for_pred_list':used_timesteps_for_pred_list,'prediction_steps_list':[1],
+                       'batch_size_window_list':[4,16,32,128],'lstm_batch_size_list_list':[20, 50, [20,20], [50,50], [50,50,50,50]]}
+    parameters = {'used_timesteps_for_pred':used_timesteps_for_pred, 'prediction_steps':prediction_steps, 
+              'scale_method':scale_method, 'batch_size_window':batch_size_window, 'lstm_batch_size_list':lstm_batch_size_list,
+              'lstm_path':lstm_path, 'patience':patience,'epochs':epochs}
     
+   
+    if action == 'find':
+        find_best_values(data_list = [data_list[len(data_list) - 1],data_list[0]], 
+                                  data_names_list = [data_names_list[len(data_list) - 1],data_names_list[0]],
+                                  events = event_df, monthly = monthly, 
+                                  multivariate = multivariate, 
+                                  find_parameters = find_parameters, parameters = parameters,
+                                  plot_loss_and_results= False)
+    elif action == 'train':
+        create_pred_for_all_columns(data_list = data_list, data_names_list = data_names_list, 
+                                              monthly = monthly , multivariate = multivariate,
+                                              events = event_df, parameters = parameters, 
+                                              plot_loss_and_results= plot_loss_and_results)
+    else: 
+        create_pred_with_trained_model(path_to_model = os.path.join(MODELS_PATH, lstm_path, 
+                                                                              multi, 
+                                                                              data_names_list[len(data_names_list) - 1], 
+                                                                              column,''),
+                                                data_list = data_list, data_names_list = data_names_list, 
+                                                monthly = monthly,  multivariate = multivariate, 
+                                                name_trained_df = 'combined_df', 
+                                                name_trained_column = 'Einzel', 
+                                                events = event_df,
+                                                parameters = parameters, plot_loss_and_results= False)
+       
