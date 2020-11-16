@@ -11,7 +11,8 @@ Created on Wed Oct 14 13:57:33 2020
 # A problem with ARIMA is that it does not support seasonal data. That is a time series with a repeating cycle.
 # ARIMA expects data that is either not seasonal or has the seasonal component removed, e.g. seasonally adjusted via methods such as seasonal differencing.
 
-from timeseries.modules.config import ORIG_DATA_PATH, SAVE_PLOTS_PATH, SAVE_MODELS_PATH, DATA, MONTH_DATA_PATH, MODELS_PATH, SAVE_RESULTS_PATH
+from timeseries.modules.config import ORIG_DATA_PATH, SAVE_PLOTS_PATH, SAVE_MODELS_PATH, \
+    DATA, MONTH_DATA_PATH, MODELS_PATH, SAVE_RESULTS_PATH, SAVE_PLOTS_RESULTS_PATH_BASE
 from timeseries.modules.dummy_plots_for_theory import save_fig, set_working_directory
 from timeseries.modules.load_transform_data import load_transform_excel
 # from timeseries.modules.sophisticated_prediction import create_dict_from_monthly
@@ -204,7 +205,7 @@ def compare_models(given_model, data, diff_faktor, rolling_window, forecast_one_
         elif given_model == 'SARIMAX':
             model_fit = SARIMAX(history, order = (order_dict['AR'],1,order_dict['MA']), 
                                 seasonal_order=(order_dict['SAR'],1,order_dict['SMA'],order_dict['S']), 
-                                enforce_stationarity=False, enforce_invertibility = False).fit(disp = 0)
+                                enforce_stationarity=True, enforce_invertibility = True).fit(disp = 0)
             yhat = model_fit.forecast(test_length)
        
         predictions.append(yhat)
@@ -435,40 +436,52 @@ if __name__ == '__main__':
         ran = True 
     
     one_step = False
-    predict_pretrained = False
-    data_list = monthly_dict.values()
-    data_names_list = monthly_dict.keys()
-    # data_list = data_frame[:]
-    # data_list.append(combined_df)
-    # data_names_list = ['df_0_einzel_aut', 'df_1_einzel_eigVkSt', 'df_2_einzel_privat',
-    #                    'df_3_einzel_bus', 'df_4_einzel_app', 'df_5_tages_aut', 
-    #                    'df_6_tages_eigVkSt', 'df_7_tages_privat', 'df_8_tages_bus', 
-    #                    'df_9_tages_app', 'combined_df']
+    predict_pretrained = True
+    # data_list = monthly_dict.values()
+    # data_names_list = monthly_dict.keys()
+    data_list = data_frame[:]
+    data_list.append(combined_df)
+    data_names_list = ['df_0_einzel_aut', 'df_1_einzel_eigVkSt', 'df_2_einzel_privat',
+                        'df_3_einzel_bus', 'df_4_einzel_app', 'df_5_tages_aut', 
+                        'df_6_tages_eigVkSt', 'df_7_tages_privat', 'df_8_tages_bus', 
+                        'df_9_tages_app', 'combined_df']
     
-    data_to_use = monthly_dict['aut']
+    data_names_list  = data_names_list [10:]
+    data_list = data_list[10:]
+    data_to_use = combined_df
     used_column = combined_df.columns[0]
-    models = ['persistance', 'ARMA', 'ARIMA', 'SARIMAX']
-    # models = ['SARIMAX']
+    # models = ['persistance', 'ARMA', 'ARIMA', 'SARIMAX']
+    models = ['SARIMAX']
     rolling_window = 7
     diff_faktor = 7
     Path_to_models = os.path.join(MODELS_PATH, 'more_steps/Einzel/', DATA , '')
     
-    used_column = 'Einzel'
+    # used_column = 'Einzel'
     if not predict_pretrained:
         result_list = list()
         for model in models:
+            
             temp, pred = compare_models(given_model = model , data = data_to_use[used_column], 
                                     diff_faktor = diff_faktor, rolling_window = rolling_window, forecast_one_step = one_step)
+            
             temp['name'] = data_name
             temp['used_column'] = used_column
             result_list.append(temp)
             # if model != 'persistance':
             #     temp['Model'].save(SAVE_MODELS_PATH + model + '_' + DATA +'.pkl')
         best_model = print_best_result(result_list)  
+
+        plt.plot(pred[1], label = 'orig')                
+        plt.plot(pred[0], label = 'pred')
+        # plt.plot(pred[pred.columns[1]], label = pred.columns[1])
+        # plt.plot(pred[pred.columns[0]], label = pred.columns[0])
+        plt.title(model + ' Plot of predicted results with RMSE: ' + str(temp['RMSE']))
+        plt.legend(loc='best')
+        save_fig('sarimax_results_plot', SAVE_PLOTS_RESULTS_PATH_BASE)
         
-        result = pd.DataFrame(result_list)
-        result.loc[result.shape[0]] = best_model
-        result.to_csv(SAVE_MODELS_PATH + 'Baseline_results.csv')
+        # result = pd.DataFrame(result_list)
+        # result.loc[result.shape[0]] = best_model
+        # result.to_csv(SAVE_MODELS_PATH + 'Baseline_results.csv')
 
         
             # train_size = int(data_to_use.shape[0]*0.9)
@@ -501,10 +514,13 @@ if __name__ == '__main__':
                                                     used_path.split('/')[-3], used_column.split()[0], data_name)
                 
                 final_res = final_res.append(res)
+                plt.plot(sub[sub.columns[0]], label = sub.columns[0])
+                plt.plot(sub[sub.columns[1]], label = sub.columns[1])
+                plt.legend(loc='best')
+                save_fig('sarimax_results_plot' + used_column, SAVE_PLOTS_RESULTS_PATH_BASE)
+                plt.show()
         final_res.to_csv(os.path.join(SAVE_RESULTS_PATH, 'combined_df_' + model +'_trained_'+ 
                                       used_path.split('/')[-3] + '.csv'), 
                                       sep = ';', decimal = ',',  index = False)
         
-        plt.plot(sub[sub.columns[0]], label = sub.columns[0])
-        plt.plot(sub[sub.columns[1]], label = sub.columns[1])
-        plt.legend(loc='best')
+        

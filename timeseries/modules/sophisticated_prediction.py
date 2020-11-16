@@ -18,7 +18,8 @@ from sklearn.preprocessing import MinMaxScaler, StandardScaler
 from sklearn.metrics import mean_squared_error
 from tqdm import tqdm
 
-from timeseries.modules.config import ORIG_DATA_PATH, SAVE_PLOTS_PATH, SAVE_MODELS_PATH, SAVE_RESULTS_PATH, ORIGINAL_PATH, MONTH_DATA_PATH,MODELS_PATH
+from timeseries.modules.config import ORIG_DATA_PATH, SAVE_PLOTS_PATH, SAVE_MODELS_PATH, \
+    SAVE_RESULTS_PATH, ORIGINAL_PATH, MONTH_DATA_PATH,MODELS_PATH, SAVE_PLOTS_RESULTS_PATH_LSTM
 from timeseries.modules.dummy_plots_for_theory import save_fig, set_working_directory
 from timeseries.modules.load_transform_data import load_transform_excel
 from timeseries.modules.baseline_prediction import combine_dataframe, monthly_aggregate
@@ -322,11 +323,13 @@ def find_best_values(data_list, data_names_list, events, monthly, multivariate,
                         rmse = mean_squared_error(inv_y[:,i], inv_yhat[:,i], squared = False)
                         title = 'Plot of prediction for timestep (t)' if i == 0 else 'Plot of prediction for timestep (t+%d)' %(i)
                         if plot_loss_and_results:
-                            plt.title(title)
-                            plt.plot(inv_y[:,i], label = 'orig')
-                            plt.plot(inv_yhat[:,i], label = 'pred')
-                            plt.legend(loc = 'best')
-                            plt.show()
+                            if parameters['save_plots']:
+                                plt.title(title)
+                                plt.plot(inv_y[:,i], label = 'orig')
+                                plt.plot(inv_yhat[:,i], label = 'pred')
+                                plt.legend(loc = 'best')
+                                plt.show()
+                                save_fig(data_name +'_'+column, SAVE_PLOTS_RESULTS_PATH_LSTM)
                         print('Test RMSE: %.3f\n' % rmse)
         
                     temp = pd.Series({'training_data':data_name, 'column_taken':take_column, 
@@ -495,18 +498,20 @@ def create_pred_with_trained_model(path_to_model, data_list, data_names_list,
             
             # Plot predictions
             for i in range(parameters['prediction_steps']):
-                rmse = mean_squared_error(inv_y[:,i], inv_yhat[:,i], squared = False)
-                title = 'Plot of prediction for timestep (t)' if i == 0 else 'Plot of prediction for timestep (t+%d)' %(i)
+                rmse = np.round(mean_squared_error(inv_y[:,i], inv_yhat[:,i], squared = False),2)
+                title = 'Plot of prediction for timestep (t) ' + take_column + '\nRMSE: '+str(rmse)if i == 0 else 'Plot of prediction for timestep (t+%d) ' %(i) + take_column + '\nRMSE: '+str(rmse)
                 if plot_loss_and_results:
-                    plt.title(title)
-                    plt.plot(inv_y[:,i], label = 'orig')
-                    plt.plot(inv_yhat[:,i], label = 'pred')
-                    plt.legend(loc = 'best')
-                    plt.show()
+                   if parameters['save_plots']:
+                        plt.title(title)
+                        plt.plot(inv_y[:,i], label = 'orig')
+                        plt.plot(inv_yhat[:,i], label = 'pred')
+                        plt.legend(loc = 'best')
+                        save_fig(data_name +'_'+take_column +'_'+multi, SAVE_PLOTS_RESULTS_PATH_LSTM)
+                        plt.show()
                 print('Test RMSE: %.3f\n' % rmse)
                 
                 temp = pd.Series({'Used Model':'LSTM','trained_df':name_trained_df,
-                                  'Trained column':name_trained_column, 'RMSE':np.round(rmse,2), 
+                                  'Trained column':name_trained_column, 'RMSE':rmse, 
                                   'Predicted column':take_column ,'Pred DataFrame':data_name})
                 
                 compare = compare.append(temp, ignore_index = True)
@@ -514,7 +519,7 @@ def create_pred_with_trained_model(path_to_model, data_list, data_names_list,
                                           
     compare.to_csv(os.path.join(SAVE_RESULTS_PATH, 'compare_'+name_trained_df+'_'+ parameters['lstm_path']+
                                 '_trained_'+name_trained_column+'_'+multi + '.csv'), sep=';', decimal=',', index = False)
-   
+
 #%%
 if __name__ == '__main__':
     # initialize
@@ -542,13 +547,14 @@ if __name__ == '__main__':
     warnings.filterwarnings('ignore')
     used_timesteps_for_pred = 49
     prediction_steps = 1
-    multivariate = False
+    multivariate = True
     batch_size_window = 16
     epochs = 40
     patience = 3 # for early stoping
     lstm_batch_size_list = [50,50,50,50]
     scale_method = MinMaxScaler()
-    plot_loss_and_results = False
+    plot_loss_and_results = True
+    save_plots = True
     monthly = True
     event_df = events 
     multi = 'multiVar' if multivariate else 'uniVar'
@@ -562,7 +568,7 @@ if __name__ == '__main__':
         used_timesteps_for_pred_list = [4, 7, 10, 30]
         event_df = monthly_events
         batch_size_window = 128
-        
+    
         if not multivariate:
             batch_size_window = 4
             lstm_batch_size_list = [20,20]
@@ -577,11 +583,14 @@ if __name__ == '__main__':
                            'df_9_tages_app', 'combined_df']
         column = 'Einzel Menge in ST'
         used_timesteps_for_pred_list = [7, 10, 30, 49, 50]
+    
+    # data_list = data_list[4:]
+    # data_names_list = data_names_list[4:]
     find_parameters = {'used_timesteps_for_pred_list':used_timesteps_for_pred_list,'prediction_steps_list':[1],
                        'batch_size_window_list':[4,16,32,128],'lstm_batch_size_list_list':[20, 50, [20,20], [50,50], [50,50,50,50]]}
     parameters = {'used_timesteps_for_pred':used_timesteps_for_pred, 'prediction_steps':prediction_steps, 
               'scale_method':scale_method, 'batch_size_window':batch_size_window, 'lstm_batch_size_list':lstm_batch_size_list,
-              'lstm_path':lstm_path, 'patience':patience,'epochs':epochs}
+              'lstm_path':lstm_path, 'patience':patience,'epochs':epochs, 'save_plots':save_plots}
     
    
     if action == 'find':
@@ -590,7 +599,7 @@ if __name__ == '__main__':
                                   events = event_df, monthly = monthly, 
                                   multivariate = multivariate, 
                                   find_parameters = find_parameters, parameters = parameters,
-                                  plot_loss_and_results= False)
+                                  plot_loss_and_results= plot_loss_and_results)
     elif action == 'train':
         create_pred_for_all_columns(data_list = data_list, data_names_list = data_names_list, 
                                               monthly = monthly , multivariate = multivariate,
@@ -606,5 +615,5 @@ if __name__ == '__main__':
                                                 name_trained_df = 'combined_df', 
                                                 name_trained_column = 'Einzel', 
                                                 events = event_df,
-                                                parameters = parameters, plot_loss_and_results= False)
+                                                parameters = parameters, plot_loss_and_results= plot_loss_and_results)
        
